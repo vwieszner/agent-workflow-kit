@@ -1,0 +1,307 @@
+# agent-workflow-kit configuration — installed as .workflow/config.toml
+#
+# Every project-specific value used by the kit's skills, agents, hooks and scripts lives here.
+# Prose refers to keys as `config: <section>.<key>`. Scripts read them via
+# .workflow/scripts/wfconfig.py. Command templates accept {placeholders}:
+#   {repo} {worktree} {stack} {slot} {story_id} {branch} {labels} {service} {compose} {project}
+#   and every port env var name declared in [stack.ports] (e.g. {BACKEND_PORT}).
+# Optional capabilities degrade explicitly: stack.runtime = "none", graph.tool = "none",
+# paths.quality_bar_doc = "" each make the dependent steps print SKIPPED instead of running.
+
+[project]
+name = "myproject"
+owner = "the owner"               # display name for the human who approves checkpoints
+communication_language = "English"      # language skills use when talking to the owner
+document_output_language = "English"    # language of documents create-story writes
+
+[git]
+base_branch = "development"       # stories branch from and merge back into this
+main_branch = "main"
+branch_prefix = "story/"          # story branch = branch_prefix + story_id
+worktrees_root = "../{project}-worktrees"   # relative to repo root; {project} = project.name
+merge_style = "--no-ff"
+max_commits_per_story = 2         # impl commit + optional close-out commit
+impl_commit_template = "feat: [Story {story_id}] <summary>"
+closeout_commit_template = "chore: [Story {story_id}] code review close-out — <summary>"
+
+[paths]
+specs_dir = "docs/implementation-artifacts"               # story specs: <specs_dir>/<story-key>.md
+sprint_status = "docs/implementation-artifacts/sprint-status.yaml"
+story_history_dir = "docs/implementation-artifacts/story-history"
+slot_registry = "docs/implementation-artifacts/slot-registry.md"
+deferred_work_dir = "docs/implementation-artifacts/deferred-work"
+epics_dir = "docs/planning-artifacts/epics"
+planning_dir = "docs/planning-artifacts"
+active_plan = ""                  # optional path to the active implementation plan
+quality_bar_doc = ""              # optional release/quality bar doc; "" disables the triage bar gate
+lessons = "LESSONS.md"
+scripts_index = "scripts/INDEX.md"   # the PROJECT's script registry (curation loop)
+artifact_catalog = ".workflow/state/artifact-catalog.md"
+# Permanent-failure log the autonomous loop appends to (log_failure.py). Markdown,
+# committed, human-inspected before a failed story is resumed.
+auto_dev_failure_log = "docs/implementation-artifacts/auto-dev-failures.md"
+# Glob for a project-context doc create-story loads as extra implementation rules.
+# "" → create-story uses "**/project-context.md"; no match is reported, not an error.
+project_context = ""
+
+[sprint_status]
+note_max_chars = 240
+statuses = ["backlog", "ready-for-dev", "in-progress", "review", "done", "blocked", "deferred", "optional"]
+
+[story_ledger]
+# Review-layer dispatches closer together than this (minutes) form one review round.
+round_gap_min = 45
+# Worktree-relative path prefixes whose uncommitted changes do NOT count as a
+# half-applied patch. paths.specs_dir is always added.
+non_source_prefixes = ["docs/"]
+
+[slots]
+count = 6                         # isolated slots 1..count
+shared_slot = 0                   # the shared dev stack; never assigned to a story
+stack_prefix = "story-"           # isolated stack/project name = stack_prefix + story_id
+shared_stack_name = "myproject"   # compose project name of the shared dev stack
+
+[stack]
+# "docker-compose" → each slot gets an isolated compose project with offset ports.
+# "none"           → slots are git worktrees only; every stack step is skipped (and says so).
+runtime = "docker-compose"
+compose_cmd = "docker compose"
+engine_cmd = "docker"             # container-engine CLI for non-compose calls (volume/network listing)
+compose_file = "docker-compose.yml"
+compose_dir = "."                 # dir (relative to the worktree) holding the compose file
+services = []                     # services that must be running, e.g. ["backend", "worker", "db"]
+# Services that must report health "healthy" (not just "running") before the slot counts as ready.
+require_healthy = []
+app_service = "backend"           # service that runs the app/test commands
+watch = true                      # run `compose watch` for live sync in each slot
+port_stride = 100                 # slot N port = base + N * port_stride
+bring_up_timeout_s = 300          # bounds the background bring-up
+ready_wait_timeout_s = 300        # wait_for_stack_ready.py default --timeout-sec
+ready_poll_s = 5
+
+[stack.ports]
+# Every host port mapping in the compose file MUST read one of these env vars
+# (${VAR:-default}); the kit passes ALL of them to every compose invocation.
+# BACKEND_PORT = 8001
+# PROXY_PORT = 8080
+# POSTGRES_PORT = 5432
+
+[stack.health]
+# Commands run by stack_preflight.py; exit 0 = healthy. Templates; optional timeout_s (default 90).
+# Placeholders: {compose} {stack} {worktree} {slot} {service} {repo} + port vars.
+checks = [
+  # { name = "app-health", cmd = "{compose} -p {stack} exec -T backend curl -fsS http://localhost:8000/health", timeout_s = 45 },
+  # { name = "migrations", cmd = "{compose} -p {stack} exec -T backend <migration check command>" },
+]
+# Source dir inside the app container that mirrors the worktree (sync check); "" disables.
+container_src = ""
+worktree_src = "."                # worktree-relative dir synced into container_src
+# Code-sync check: substrings of worktree-relative paths to skip (mirror the compose
+# `develop.watch` ignore list); directory names listed here are also pruned from the walk.
+sync_ignores = [".git", "__pycache__", ".pytest_cache", ".pyc", "node_modules"]
+sync_sample_count = 3             # most-recently-modified files compared per preflight run
+sync_grace_s = 30                 # a mismatch on a file younger than this is WARN, not FAIL
+# Watch mounts, most-specific prefix wins. Empty → one mount worktree_src → container_src
+# in stack.app_service. List every `develop.watch` sync target:
+# sync_mounts = [
+#   { host_prefix = "src/frontend/", services = ["frontend"], container_root = "/app" },
+#   { host_prefix = "src/",          services = ["backend", "worker"], container_root = "/app" },
+# ]
+sync_mounts = []
+
+[env]
+# Host-passive mode: app-side commands (the app's runtime, package managers, test runners)
+# run only inside the app container via `{compose} -p {stack} exec -T <service> ...`.
+# false → the host-passive rule is off (app runs on the host).
+app_runs_in_container = true
+# Sanctioned runner for standalone tooling scripts and hooks on the host (stdlib / PEP 723 only).
+host_tooling_runner = "uv run --no-project"
+# Interpreter for host scripts that import project code (e.g. ".venv/bin/python"). "" → none sanctioned.
+project_python = ""
+# Dependency manifests/lockfiles that must be committed together after any dependency change.
+dependency_files = []             # e.g. ["pyproject.toml", "uv.lock", "package.json", "package-lock.json"]
+# Host commands allowed to EDIT dependency manifests without installing anything.
+dependency_edit_cmds = []         # e.g. ["uv add --no-sync {pkg}", "uv lock"]
+dependency_rebuild_cmd = ""       # e.g. "{compose} build backend worker && {compose} up -d"
+container_install_cmd = ""        # e.g. "{compose} exec -T frontend npm install {pkg}"
+
+[tests]
+# {labels} = space-separated test labels chosen by the agent.
+scoped_cmd = ""                   # e.g. "{compose} -p {stack} exec -T backend pytest {labels}"
+full_cmd = ""                     # the full gate's main leg; run by run_full_suite.py
+unit_frontend_cmd = ""            # optional concurrent leg
+e2e_cmd = ""                      # optional concurrent leg
+lint_cmd = ""
+# Optional sequential phases around the concurrent legs: { name = "<label>", cmd = "<template>" }.
+# A failing pre-phase aborts the gate with its own exit code; a failing post-phase fails it (exit 1).
+full_pre_phases = []    # e.g. [{ name = "lint", cmd = "{compose} -p {stack} exec -T app make lint" }]
+full_post_phases = []   # e.g. [{ name = "coverage-check", cmd = "python3 tools/check_coverage.py" }]
+# Regexes run_full_suite.py / run_scoped_tests.py use to parse results.
+fail_id_regex = "^(?:FAIL|ERROR): (\\S+)"
+summary_regex = "^(?:Ran \\d+ tests?|=+ .* in [\\d.]+s)"
+full_lock_timeout_min = 60        # the gate lock is host-global; a queued run fails after this
+
+[tests_policy]
+# Substrings every scoped/backend test invocation MUST carry (non-interactive flags, test profile).
+required_flags = []               # e.g. ["--noinput", "--settings=myapp.settings.test"]
+# E2E locator attribute — the ONLY permitted locator strategy. "" disables the locator policy.
+e2e_locator_attr = "data-testid"
+e2e_page_objects_dir = ""         # e.g. "frontend/tests/pages"; "" disables
+e2e_worker_fixture = ""           # e.g. "frontend/tests/helpers.js::testUsers"
+e2e_capacity_knobs = []           # knobs that must move together when raising E2E worker count
+live_infra_test_bases = []        # helper bases giving live-infra tests their per-test isolation token
+e2e_strike_limit = 3              # failed E2E fix attempts before stopping with a failure packet
+
+[ui]
+base_url = ""                     # base URL for UI-driven tasks (the proxy), e.g. "http://localhost:8080"
+credentials_source = ""           # where valid test credentials are defined; never guess them
+
+[schema]
+# Pre-production single-migration policy. true → no new migration files; edit the initial
+# migration in place; no backward-compatibility tests; reset stale DBs after editing.
+preprod = false
+test_db_reset_cmd = ""            # lists/drops reused (--keepdb-style) test databases. "" → state it manually
+stack_reset_cmd = ""              # e.g. "{compose} -p {stack} down -v && {compose} -p {stack} up -d --build"
+
+[pipeline]
+# Globs of persistent-schema definition files. A story editing a match triggers story-impl's
+# schema-impact check. [] → the check is skipped and says so.
+schema_globs = []                 # e.g. ["**/migrations/*.py", "db/schema.sql"]
+post_reset_cmds = []              # run after a full slot reset, e.g. re-seeding test users
+full_suite_hang_cap_min = 15      # test-bat-runner: RUNNING wall-time cap before declaring a hang
+
+[smoke]
+# Post-merge smoke on the shared stack. Services must be running; logs checked for these.
+services = []
+log_error_patterns = ["Traceback \\(most recent call last\\)", "\\bERROR\\b", "Exception"]
+log_since = ""                    # e.g. "5m" narrows the scan; "" → last log_tail lines only
+log_tail = 20                     # log lines per service scanned
+# Source-sync gate: git pathspecs of the merge diff to verify; empty → the sync-mount host prefixes.
+sync_paths = []
+sync_exts = [".py", ".js", ".jsx", ".ts", ".tsx", ".json"]   # empty → every file in sync_paths
+max_sync_files = 40
+# Failure diagnoses: first matching pattern(s) against the log tails are printed with cause + fix.
+# `fix` is a template: {compose} {stack} {services} {service} {ports_env} {repo}.
+# Omit `fix` to print "surface the log lines; do NOT auto-fix".
+diagnoses = [
+  { id = "B", title = "Package restructure / file deletion", pattern = "ModuleNotFoundError|ImportError|cannot import name|Cannot find module", cause = "compose watch syncs new/modified files but does NOT delete removed files; a deleted module still exists in the container, shadowing the new layout.", fix = "{ports_env} {compose} -p {stack} up -d --build {services}" },
+  { id = "C", title = "Possible env-var change", pattern = "KeyError|environment variable|env var", cause = "env vars are baked at container creation; neither compose watch nor a code sync picks up env-file changes.", fix = "{ports_env} {compose} -p {stack} up -d --force-recreate {services}" },
+]
+# Merge touched migrations → live-DB drift diagnosis. Empty regex disables it.
+migration_paths_regex = ""        # e.g. "migrations/"
+migration_plan_cmd = ""           # the migration tool's dry-run/plan command
+migration_plan_clean_regex = ""   # regex matching the plan output when nothing is pending
+
+[review]
+round2_min_patches = 5            # round-2 review fires at >= this many approved patches
+round2_min_files = 4              # ... or patches touching >= this many unique files
+required_preamble = "Report findings only — do NOT auto-apply patches — do NOT edit any files — recommend a classification per finding (patch / defer / dismiss) but the owner triages each one."
+
+[models]
+# tier → model id, per tool. Agents declare a tier; install.py renders the concrete model.
+[models.claude]
+deep = "opus"
+standard = "sonnet"
+fast = "haiku"
+[models.opencode]
+deep = "anthropic/claude-opus-5-5"
+standard = "anthropic/claude-sonnet-5"
+fast = "anthropic/claude-haiku-4-5-20251001"
+# Fallback for a failed `deep`-tier dispatch (story-spec, review layers, findings-evaluator):
+# retried once with this model as a dispatch-time override. "" → retry on the same model.
+# findings-verifier never uses a fallback. OpenCode has no per-dispatch model override, so a
+# non-empty opencode value only applies where the adapter supports it.
+[models.fallback.claude]
+deep = ""                         # e.g. "sonnet"
+[models.fallback.opencode]
+deep = ""
+
+[graph]
+# Optional code knowledge-graph MCP. "none" → graph steps skipped; navigation uses grep/read.
+tool = "none"                     # "codebase-memory-mcp" | "none"
+mcp_server = "codebase-memory-mcp"
+cli = ""                          # CLI binary used to index a worktree, e.g. "~/.local/bin/codebase-memory-mcp"
+main_project = ""                 # graph project name of the main checkout (slot agents must not query it)
+# Per-project index files (<project>.db); graph_query denies queries against an unindexed
+# project. "" or a missing dir skips that check.
+cache_dir = "~/.cache/codebase-memory-mcp"
+
+[docs]
+# Optional library-docs MCP (agents with the `docs` capability). "" disables.
+mcp_server = "context7"
+
+[guards]
+# Each guard can be disabled individually. Pattern lists extend the built-in defaults.
+# Guards fail OPEN on an internal error and CLOSED on a matched rule.
+bash_command = true
+powershell_command = true
+dispatch_prompt = true
+phase_dispatch = true
+graph_query = true
+mcp_readonly = true
+script_registration = true
+agent_source_read = true
+# Commands that must never run on the host (they belong in a container), regex list.
+# Empty → the host-passive rule is prose only, not enforced.
+host_forbidden = []               # e.g. ["^npm\\b", "^node\\b", "^pip\\b", "^python3?\\b"]
+host_forbidden_hint = ""          # remedy text appended to a host_forbidden denial
+block_host_installs = true        # pip install / uv pip install / uv sync / uv add without --no-sync
+# Branches no agent may push to. Empty → [git.main_branch, git.base_branch, "master"].
+protected_branches = []
+# Project command rules for Bash and PowerShell (regex, case-insensitive, whole command). Example:
+# command_deny = [ { pattern = "manage\\.py\\s+makemigrations(?![^|;&\\n]*--(check|dry-run))", reason = "edit the initial migration instead" } ]
+command_deny = []
+# PowerShell recursive-delete allowlist ({repo}/{project} allowed). Empty → repo root, worktrees root, temp.
+recursive_delete_allowed = []
+# Subagents exempt from / subject to the "report findings only" preamble check.
+non_review_agents = ["story-spec", "story-impl", "story-finalize", "test-bat-runner", "dev-preflight", "trace-port-traffic", "general-purpose", "Explore", "Plan"]
+review_agents = ["blind-hunter", "edge-case-hunter", "acceptance-auditor", "findings-verifier", "findings-evaluator"]
+# graph_query: agents that only run inside a story worktree (may not query graph.main_project).
+slot_only_agents = ["story-impl", "story-finalize"]
+graph_exempt_tools = ["index_repository", "list_projects", "delete_project", "index_status"]
+# agent_source_read: agents denied shell reads of source files (skipped when graph.tool = "none").
+source_read_gated_agents = ["story-impl", "story-finalize"]
+source_suffixes = [".py", ".js", ".jsx", ".ts", ".tsx"]
+# script_registration: dirs whose direct children must be registered in paths.scripts_index.
+script_dirs = ["scripts"]
+script_suffixes = [".py", ".ps1", ".sh"]
+# mcp_readonly: database MCP servers kept read-only. dialect: "cypher" | "sql" | "none".
+# mcp_readonly_servers = [ { server = "graphdb", dialect = "cypher" }, { server = "postgres", dialect = "sql", extra_deny = [] } ]
+mcp_readonly_servers = []
+
+[session]
+handoff_on_compact = true         # write .workflow/state/handoff.md before compaction
+# Headless agent command; {prompt} becomes the prompt as one argument.
+# "" → `claude -p {prompt}` (Claude Code) / `opencode run {prompt}` (OpenCode).
+handoff_cmd = ""
+handoff_timeout_s = 180
+# Library-docs MCP tools re-asserted after compaction/resume (fully-qualified Claude names).
+docs_mcp_tools = []               # e.g. ["mcp__context7__resolve-library-id", "mcp__context7__query-docs"]
+
+[curation]
+journal_retention_days = 30
+proposal_kinds = ["skill", "agent", "rule", "script", "memory"]
+retro_threshold = 8               # new journal facts before the analyst launches / the nudge fires
+retro_cooldown_s = 600            # min seconds between two auto-launched analysts
+# Headless analyst launched before compaction: "auto" | "claude" | "opencode" | "off".
+# WORKFLOW_RETRO_AUTOSPAWN=0 also disables it.
+analyst = "auto"
+agent_source_dir = ".workflow/agents"   # promoted agents (kit source format), committed
+# Promoted memory. "" → the tool's native project memory dir when it has one (Claude Code),
+# otherwise ".workflow/memory" (loaded by OpenCode through opencode.json `instructions`).
+memory_dir = ""
+
+[loop]
+# Milestone whose milestone-blockers report feeds auto-dev-loop's story picker.
+# "" → the first ready-for-dev story in sprint status (file order).
+milestone = ""
+max_stories = 0                   # stories per invocation; 0 = unlimited; env AUTO_DEV_LOOP_MAX_STORIES overrides
+cleanup_paths = []                # extra repo-relative dirs auto-dev-loop may delete recursively
+
+[milestones]
+# One sub-table per milestone; the dependency-map schema is in the milestone-blockers skill.
+# [milestones.release-1]
+# map_file = "docs/implementation-artifacts/sprint-status.yaml"   # default: paths.sprint_status
+# map_key = "release-1.dependency_map"     # default "<name>.dependency_map"
+# member_marker = "\\[R1\\]"               # regex on sprint-status row notes; "" skips the coverage check
+# priority_markers = ["BLOCKING-T1", "BLOCKING-T2"]   # ranks group-0 candidates; [] → map order
