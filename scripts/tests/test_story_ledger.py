@@ -65,6 +65,14 @@ class LedgerAndRecordTests(unittest.TestCase):
             self.assertEqual(story_record.cmd_check("7-2", "bogus"), 2)
         self.assertEqual(self._run("append", "7-2", "  -  ")[0], 2)
 
+    def test_negative_verdicts_match_whole_words_only(self):
+        self._run("append", "7-2", "phase-2 tests GREEN — sharedRoster rendered, test_error_handling (4 tests)")
+        self.assertEqual(self._run("check", "7-2", "phase-2")[0], 0,
+                         "a negative inside a longer word vetoed a GREEN line")
+        self._run("append", "7-2", "phase-3 tests GREEN then FAILED on rerun (2 errors)")
+        self.assertEqual(self._run("check", "7-2", "phase-3")[0], 1,
+                         "an inflected negative (FAILED / errors) did not veto the line")
+
     def test_journal_turns_become_phases_and_rounds(self):
         jdir = self.root / ".workflow" / "state" / "journal"
         jdir.mkdir(parents=True)

@@ -22,7 +22,7 @@ readonly: false
 - `approved_patches` — the **patch manifest**: one row per approved finding — `finding_id | file (repo-relative) | line | change (imperative description of the exact edit) | notes (optional)`
 - `deferred_findings` — findings the owner classified **defer**, each with its verifier `bar impact:` line
 - `dismissed_findings` — classified **dismiss** (no action; ignored)
-- `round` — `1`, or `2` for a Round 2 run (amend mode)
+- `round` — `1`, `2` for a Round 2 run, or `gate-fix` for a pre-merge gate fix (both amend the close-out)
 
 ## Hard rules in force
 
@@ -39,6 +39,7 @@ readonly: false
   Narrative, dates, finding ids, story/AC tags, and branch provenance go to `config: paths.story_history_dir`/`<key>.md` or the per-story deferred-work file — never into source. **Test files are exempt from the story/AC-tag ban only** — never strip a test docstring's AC tag while patching, never raise it as a finding. Before saving a file, delete every comment line that does not change what a reader would DO.
 - **Commit cap.** This agent makes at most ONE commit (the close-out); a Round 2 run amends it. Never exceed `config: git.max_commits_per_story` commits on the branch.
 - **Decision points are human.** If a patch is ambiguous, conflicts with another, or needs a design call to apply correctly — HALT and report. Never pick a side silently.
+- **One job: apply the manifest.** Rebasing or re-stacking the branch belongs to `story-rebase`; root-causing a pre-merge gate failure belongs to `story-diagnose` — you apply the `G<n>` manifest it produces; other investigations (profiling) are separate dispatches. If the prompt asks for any of these, HALT and name the dispatch it belongs to. Failures in your own Step 3 run are yours to fix under the batch-fix rule.
 - **Graph-first navigation** (when `graph_project` is given): graph calls pass `project=<graph_project>`, never `config: graph.main_project` (denied by `.workflow/hooks/guards/graph_query.py`). The manifest already carries every location, so graph use here is limited to reading a named symbol. With no graph configured, use read.
 
 ## Steps
@@ -53,7 +54,7 @@ readonly: false
 
 Report what arrived versus what was expected, name the missing rows, and ask the orchestrator for the manifest. Do NOT reconstruct locations by grep/glob/graph search: a missing manifest is a HALT, never a search.
 
-**Also HALT if the triage was never persisted.** The story's findings file (`<config: paths.specs_dir>/<story>*code-review-findings*.md` in the worktree) MUST contain a `## Triage decisions` section carrying all three lists (for Round 2, the round-2 section). If it does not, the boundary is not resumable — say so and ask for it before applying anything.
+**Also HALT if your manifest was never persisted.** The story's findings file (`<config: paths.specs_dir>/<story>*code-review-findings*.md` in the worktree) MUST contain the section your manifest came from: `## Triage decisions` carrying all three lists for a review round (for Round 2, the round-2 section), `## Gate fix` for a gate-fix run. Check it with grep for that heading on that file — never read the findings file: the manifest in your prompt is your only input, and the file grows to hundreds of KB. If the heading is absent, the boundary is not resumable — say so and ask for it before applying anything.
 
 For each manifest row: read the named file at the named line and apply the described change. Match the existing style of the file — except comment density, which follows the comment-discipline rule.
 
@@ -119,7 +120,7 @@ git diff --cached --quiet
 
 Exit 0 (nothing staged) → skip the commit and return (all findings dismissed, no defers).
 
-Otherwise commit with a subject from `config: git.closeout_commit_template`, summary chosen by what is staged:
+Otherwise commit with a subject from `config: git.closeout_commit_template`, summary chosen by what is staged. If the branch already carries a close-out commit (a later review round, or a gate fix), `git commit --amend` it instead and extend its subject with this run's counts — never an extra commit.
 
 | Staged | Summary |
 |---|---|
@@ -131,7 +132,7 @@ Otherwise commit with a subject from `config: git.closeout_commit_template`, sum
 
 plus any attribution trailer the project or tool requires.
 
-**Round 2 (`round: 2`):** fold the changes into the existing close-out commit with `git commit --amend` (update the subject counts to the union); if round 1 produced no close-out commit, create it now. Never create an extra commit.
+**Round 2 / gate fix (`round: 2` or `gate-fix`):** fold the changes into the existing close-out commit with `git commit --amend` (extend the subject with this run's counts); if no close-out commit exists yet, create it now. Never create an extra commit.
 
 Confirm with `git log --oneline -n 3` — the impl commit plus the close-out commit.
 

@@ -143,6 +143,8 @@ Plans, specs, sprint status, epics, audits, and these rules are the record.
    (`config: paths.specs_dir`), audits (`config: paths.planning_dir`), the active plan
    (`config: paths.active_plan`), `AGENTS.md`/rules if project-wide, memory if a recurring class of
    decision. Grep for stale references, update each, and tell the owner what was updated.
+   Make all of one decision's edits in a single pass — one write per file, or all the edits issued
+   together in one message — never one edit per turn.
 2. **Ambiguity/contradiction.** If a doc is ambiguous or contradicts another, stop, ask the owner,
    and propagate the answer. Subagents surface divergences to the orchestrator; they never auto-resolve.
 3. **In-flight spec changes.** (a) When a story's spec changes during implementation, capture it in the
@@ -213,7 +215,8 @@ editing it. **In a story slot, query only the slot's graph project** (from
   shards. Full rule: `.workflow/rules/parallel-test-isolation.md`.
 - **Pre-merge full gate.** Scoped green cannot catch parallel-isolation regressions. Run the full gate
   before merging when the change touches shared infra, adds a connection-holding singleton, touches
-  seed/E2E worker plumbing, or ends a wave. When in doubt, run it.
+  seed/E2E worker plumbing, or ends a wave. When in doubt, run it. A failing leg on a story branch
+  goes to the `story-diagnose` subagent, never to `story-finalize` or `story-impl`.
 - **Batch-fix iteration.** Capture the failure list once, fix all, validate once per round; ask the
   owner when a failure needs judgment. Dispatch prompts must not ask for per-fix test runs
   (guard: `.workflow/hooks/guards/dispatch_prompt.py`).

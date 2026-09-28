@@ -23,7 +23,12 @@ Steps (all synchronous, all fast):
   1. Reserve a slot via reserve_slot.py (mutex-protected).
   2. Compute the slot's host ports (wfconfig.slot_ports).
   3. Create the worktree off `config: git.base_branch` on branch
-     `config: git.branch_prefix`<id> (reused if it already exists).
+     `config: git.branch_prefix`<id> (reused if it already exists), then seed
+     each `config: git.worktree_seed_files` entry from the repo root. Those files
+     are gitignored (e.g. `.env`), so a fresh worktree has none, and compose
+     resolves `.env` from its CWD -- the worktree -- so every `${VAR:-default}`
+     would otherwise silently take its default in the slot stack. An existing
+     copy in the worktree is left alone.
   4. Locate the story spec under <worktree>/`config: paths.specs_dir` (exit 3 on
      ambiguity -- before any graph/status artifacts are created).
   5. Index the worktree into the code graph and capture the returned project
@@ -52,6 +57,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -216,6 +222,17 @@ def main() -> None:
                              "-b", branch, str(worktree), base])
         if wt.returncode != 0 or not worktree.exists():
             fail(f"git worktree add failed (exit {wt.returncode})")
+
+    for rel in wfconfig.get("git.worktree_seed_files", [".env"]) or []:
+        src, dst = repo_root / rel, worktree / rel
+        if dst.exists():
+            print(f"story-setup: worktree {rel} already present -- left as-is")
+        elif src.is_file():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            print(f"story-setup: seeded worktree {rel} from {src}")
+        else:
+            print(f"  WARNING: no {rel} at {src} -- the slot runs without it")
 
     # ------------------------------------------------------------------ 4) spec
     dashed, dotted = sid, sid.replace("-", ".")

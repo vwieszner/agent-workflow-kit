@@ -81,6 +81,8 @@ PHASE_LABEL = {
     "story-impl": "phase-2 (implementation)",
     "findings-verifier": "post-phase-2b (verification)",
     "story-finalize": "phase-3 (finalize)",
+    "story-rebase": "rebase",
+    "story-diagnose": "pre-merge gate diagnosis",
 }
 
 # Suffixes of OTHER per-story artifacts that live in the same directory as the
@@ -308,12 +310,17 @@ def handoff_state(vs: list[str], record: list[str], arts: str) -> list[tuple[str
 
         Keyword presence alone is not a verdict: a line must carry one of `positive`
         and none of `negative` to satisfy the row (`phase-2 tests RED` never counts).
+
+        A negative matches only as a whole word, optionally inflected
+        (-s/-ed/-ing/-ure/-ures): `FAILED` and `errors` count, but `red` inside
+        `sharedRoster` or `rendered` and `error` inside `test_error_handling` do not.
         """
         for line in record:
             low = line.lower()
             if not all(k in low for k in keys):
                 continue
-            if any(n in low for n in negative):
+            if any(re.search(rf"\b{re.escape(n)}(?:s|ed|ing|ure|ures)?\b", low)
+                   for n in negative):
                 continue
             if positive and not any(p in low for p in positive):
                 continue
@@ -555,6 +562,9 @@ def build(story_id: str) -> str:
             "story-impl": "layered-review (round 1)",
             "findings-verifier": "checkpoint-2 triage",
             "story-finalize": "round-2 trigger check, else checkpoint-3 (merge approval)",
+            "story-rebase": "the step the rebase was for (record a NEXT: line when dispatching it)",
+            "story-diagnose": "write the ## Gate fix section, then story-finalize applies it"
+                              " (or relay the report to the owner)",
         }.get(last_type, "post-phase-2b verification, then checkpoint-2")
         # A record line carrying "NEXT:" is the human-authored next step and
         # outranks the dispatch-derived guess.

@@ -23,6 +23,10 @@ merge_style = "--no-ff"
 max_commits_per_story = 2         # impl commit + optional close-out commit
 impl_commit_template = "feat: [Story {story_id}] <summary>"
 closeout_commit_template = "chore: [Story {story_id}] code review close-out — <summary>"
+# Gitignored files story_setup.py copies from the repo root into a new worktree (never
+# overwriting the worktree's own copy). Compose reads `.env` from the worktree, so without it
+# every ${VAR:-default} silently takes its default in the slot stack. [] disables seeding.
+worktree_seed_files = [".env"]
 
 [paths]
 specs_dir = "docs/implementation-artifacts"               # story specs: <specs_dir>/<story-key>.md
@@ -168,6 +172,9 @@ stack_reset_cmd = ""              # e.g. "{compose} -p {stack} down -v && {compo
 # schema-impact check. [] → the check is skipped and says so.
 schema_globs = []                 # e.g. ["**/migrations/*.py", "db/schema.sql"]
 post_reset_cmds = []              # run after a full slot reset, e.g. re-seeding test users
+# Extra globs (beyond env.dependency_files, schema_globs, stack.compose_file, Dockerfile*) whose
+# change under a rebase means the slot stack must be rebuilt, e.g. seeded feature-flag defaults.
+stack_affecting_globs = []
 full_suite_hang_cap_min = 15      # test-bat-runner: RUNNING wall-time cap before declaring a hang
 
 [smoke]
@@ -254,13 +261,13 @@ command_deny = []
 # PowerShell recursive-delete allowlist ({repo}/{project} allowed). Empty → repo root, worktrees root, temp.
 recursive_delete_allowed = []
 # Subagents exempt from / subject to the "report findings only" preamble check.
-non_review_agents = ["story-spec", "story-impl", "story-finalize", "test-bat-runner", "dev-preflight", "trace-port-traffic", "general-purpose", "Explore", "Plan"]
+non_review_agents = ["story-spec", "story-impl", "story-finalize", "story-rebase", "story-diagnose", "test-bat-runner", "dev-preflight", "trace-port-traffic", "general-purpose", "Explore", "Plan"]
 review_agents = ["blind-hunter", "edge-case-hunter", "acceptance-auditor", "findings-verifier", "findings-evaluator"]
 # graph_query: agents that only run inside a story worktree (may not query graph.main_project).
-slot_only_agents = ["story-impl", "story-finalize"]
+slot_only_agents = ["story-impl", "story-finalize", "story-rebase", "story-diagnose"]
 graph_exempt_tools = ["index_repository", "list_projects", "delete_project", "index_status"]
 # agent_source_read: agents denied shell reads of source files (skipped when graph.tool = "none").
-source_read_gated_agents = ["story-impl", "story-finalize"]
+source_read_gated_agents = ["story-impl", "story-finalize", "story-diagnose"]
 source_suffixes = [".py", ".js", ".jsx", ".ts", ".tsx"]
 # script_registration: dirs whose direct children must be registered in paths.scripts_index.
 script_dirs = ["scripts"]

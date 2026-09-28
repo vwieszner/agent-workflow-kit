@@ -385,7 +385,8 @@ ones only one run produced (union, not consensus).
 
 Same pass as `parallel-dev-wave` Post-Phase 2b. Dispatch the `findings-verifier` subagent (prompt
 leads with `config: review.required_preamble`; names `graph_project`, or `none`) with every finding
-in `findings_union`, keyed by a stable finding id. Split the union across several dispatches when it
+in `findings_union`, keyed by a stable finding id, each carried verbatim (id, claim, cited file:line,
+layer evidence) — never the findings-file path, which the verifier does not read. Split the union across several dispatches when it
 is large; every finding goes to exactly one verifier.
 
 - **Silence is a failure.** A dispatch counts as FAILED if it errors, returns no report, or covers

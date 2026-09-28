@@ -3,7 +3,7 @@ name: edge-case-hunter
 description: Code-review layer 2 — edge cases. Walks every branching path and boundary condition in the supplied diff, with read (+ optional graph) access to the project; reports only unhandled edge cases. Reports findings only; never edits anything. Dispatched by the layered-review skill step 2 — do not invoke directly.
 mode: subagent
 tier: deep
-effort: xhigh
+effort: high
 tools: [read, grep, glob, graph]
 readonly: true
 ---

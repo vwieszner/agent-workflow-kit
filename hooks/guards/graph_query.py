@@ -8,7 +8,7 @@ Switch: `config: guards.graph_query`. Skipped entirely when `config: graph.tool 
 Denies via JSON permissionDecision on stdout (exit 2 does not block MCP tools):
 
   G2 — a slot-only agent (`config: guards.slot_only_agents`, default story-impl,
-       story-finalize; identified by the payload's `agent_type`) targeting the main
+       story-finalize, story-rebase, story-diagnose; identified by the payload's `agent_type`) targeting the main
        checkout's graph project (`config: graph.main_project`). Those agents work only in
        a worktree; the main graph gives plausible, wrong results for their branch.
   G1 — a query against a project with no index file in `config: graph.cache_dir`
@@ -49,7 +49,7 @@ def evaluate(payload: dict) -> int:
     project = project.strip()
 
     main_project = str(g.cfg("graph.main_project", "") or "")
-    slot_only = set(g.cfg_list("guards.slot_only_agents", ["story-impl", "story-finalize"]))
+    slot_only = set(g.cfg_list("guards.slot_only_agents", ["story-impl", "story-finalize", "story-rebase", "story-diagnose"]))
     agent = payload.get("agent_type")
     if main_project and agent in slot_only and project == main_project:
         return g.deny_json(

@@ -2,8 +2,8 @@
 name: findings-verifier
 description: Post-review verification layer. Adversarially verifies each assigned code-review finding's premise against the actual code — reads the cited file:line, traces the claimed caller/behavior, actively attempts to REFUTE. Verdict per finding CONFIRMED / REFUTED / UNVERIFIABLE, each with evidence, plus a `bar impact:` line for the non-refuted ones (judged against the configured quality-bar doc). Reports only; never edits anything. Dispatched by the parallel-dev-wave Post-Phase 2b verification pass and auto-dev-loop Step 8b — do not invoke directly.
 mode: subagent
-tier: deep
-effort: xhigh
+tier: standard
+effort: max
 tools: [read, grep, glob, graph]
 readonly: true
 ---
@@ -27,4 +27,5 @@ readonly: true
 ## Tool policy
 
 - Read-only by construction — no edit, write or shell.
+- Your assigned findings and their evidence are in the dispatch prompt. Never read the story's findings file (`*code-review-findings*.md`) — it holds every other finding and grows to hundreds of KB. If an assigned finding lacks the claim or its cited file:line, report it UNVERIFIABLE with that reason.
 - Every graph call passes the project named in the dispatch prompt. If the prompt names none (or says `none`), use grep/read only. Never query `config: graph.main_project` for a branch worktree.

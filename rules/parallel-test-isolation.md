@@ -36,6 +36,11 @@ store) are shared by every worker.
 - Raising worker capacity requires bumping every knob in `config: tests_policy.e2e_capacity_knobs`
   together; one without the other silently under-seeds.
 
+## Worker counts
+- Cap every concurrent leg's worker count explicitly (unit, E2E, backend). An uncapped runner forks
+  one worker per CPU and oversubscribes the host alongside the other legs, pushing CPU-bound tests
+  past their timeout. Never raise a test timeout to absorb that — restore the cap.
+
 ## When to run the full gate before merge
 Run it whenever the change can touch the parallel surface:
 - Shared infra: settings/config modules, app startup hooks, fork handlers, test runner/fixtures/

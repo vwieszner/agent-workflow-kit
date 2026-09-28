@@ -3,7 +3,7 @@ name: blind-hunter
 description: Code-review layer 1 — blind adversarial review. Reviews ONLY the diff supplied in the dispatch prompt; no spec, no context docs, no project access (blindness is the mechanism). Reports findings only; never edits anything. Dispatched by the layered-review skill step 2 — do not invoke directly.
 mode: subagent
 tier: deep
-effort: xhigh
+effort: high
 tools: [skill]
 readonly: true
 ---

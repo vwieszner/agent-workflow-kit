@@ -58,6 +58,10 @@ Config keys are cited as `config: <section>.<key>` and live in `.workflow/config
   │       second Phase 3 run AMENDS the close-out commit (no extra commit)
   │     ↳ the owner may force-skip or force-run regardless of threshold
   │
+  ├─ Pre-merge gate (when AGENTS.md's pre-merge full-gate triggers apply)
+  │     ↳ a failing leg → story-diagnose → story-finalize applies its
+  │       manifest (amends the close-out) → gate re-run
+  │
   ├─ Checkpoint 3: MERGE APPROVAL (human)
   │     ↳ branch, commits, recorded test results, deferred items → explicit go-ahead
   │
@@ -74,6 +78,8 @@ uv run --no-project .workflow/scripts/story_ledger.py <story-id>
 ```
 
 It reports the position — phases observed, review rounds, `story-finalize` runs, commits, and which artifacts exist — projected from the session journal (`.workflow/state/journal/`) plus git plus disk. Nothing writes it, so it cannot be stale. Read the position, then follow its pointers to ground truth (the findings file for verdicts and triage decisions, git for commits) rather than reconstructing state from the conversation. It reports what it found: a missing phase is not proof the phase did not run.
+
+**Fresh session at every human checkpoint.** At Checkpoints 1, 2, 2b and 3, once the owner's decision is on disk (the `story_record.py` line, or the `## Triage decisions` section of the findings file) and before the next subagent is dispatched, end the message with `State saved — clear the context, then resume parallel-dev-wave <story-id>`. Offer it only when no subagent this session dispatched is still running. The resumed session runs `story_ledger.py <story-id>`, reads only the section the next phase needs (for Phase 3: the `## Triage decisions` section, not the whole findings file), and dispatches. A story session idle for more than an hour resumes the same way — never by continuing the old conversation.
 
 ---
 
@@ -146,10 +152,12 @@ Each agent declares a **tier** and an **effort** in its frontmatter; the concret
 | Role (agent) | Tier | Effort | Fallback |
 |---|---|---|---|
 | spec creation (`story-spec`, wrapping `create-story`) | `deep` | `xhigh` | `config: models.fallback.<tool>.deep` |
-| review layers (`blind-hunter`, `edge-case-hunter`, `acceptance-auditor`) | `deep` | `xhigh` | `config: models.fallback.<tool>.deep` |
-| Post-Phase 2b findings verification (`findings-verifier`) | `deep` | `xhigh` | none |
+| review layers (`blind-hunter`, `edge-case-hunter`, `acceptance-auditor`) | `deep` | `high` | `config: models.fallback.<tool>.deep` |
+| Post-Phase 2b findings verification (`findings-verifier`) | `standard` | `max` | none |
 | `story-impl` | `standard` | `max` | — |
 | `story-finalize` | `standard` | `max` | — |
+| `story-rebase` | `standard` | `max` | — |
+| `story-diagnose` | `standard` | `max` | — |
 | `dev-preflight` (diagnosis-only; never the gate) | `standard` | `high` | — |
 | `test-bat-runner` (not dispatched by this pipeline) | `standard` | `medium` | — |
 | `findings-evaluator` (auto-dev-loop only — replaces human triage there) | `deep` | `xhigh` | `config: models.fallback.<tool>.deep` |
@@ -252,7 +260,7 @@ Pass in the args:
 2. **The graph project.** When `config: graph.tool` is not `none`: review subagents reading worktree code through the graph must use `project=<graph_project>` — `config: graph.main_project` is the main checkout's graph, not this branch's.
 3. **The model directive** — the review skill carries no model policy of its own; the invoker owns it:
 
-   > Dispatch the layers as their typed subagents — `blind-hunter`, `edge-case-hunter`, `acceptance-auditor` (their definitions carry tier `deep` and read-only tool sets). If a dispatch fails (model unavailable / dispatch error), retry that layer once per the model-policy fallback. Only after both attempts fail does a layer count as failed.
+   > Dispatch the layers as their typed subagents — `blind-hunter`, `edge-case-hunter`, `acceptance-auditor` (their definitions carry the tier and read-only tool sets — pass no model override). If a dispatch fails (model unavailable / dispatch error), retry that layer once per the model-policy fallback. Only after both attempts fail does a layer count as failed.
    >
    > **A layer counts as FAILED if the dispatch errors OR the subagent returns no report. Silence is a failure, not a pass.** A subagent that runs to completion and emits nothing is retried exactly like a crashed one, then marked failed and recorded in `{failed_layers}`. Never let an empty layer pass silently.
 
@@ -265,7 +273,7 @@ Collect the full findings list verbatim. It feeds the verification pass below �
 Raw review output is never presented directly — it contains false positives, and human triage time is spent only on verified items.
 
 1. **Dedupe/merge** the raw findings (the same issue from multiple layers becomes one finding with merged sources/evidence).
-2. **Verify every deduped finding.** Dispatch `findings-verifier` subagent(s) (tier `deep`, read-only — never override its model). Prompts lead with `config: review.required_preamble`, list the assigned findings, and name the graph `project` (the slot's `graph_project`, when a graph is configured). The verifier adversarially checks each finding's premise against the actual code — reads the cited file:line, traces the claimed caller/behavior, actively attempts to REFUTE. Verdict per finding: **CONFIRMED** (evidence), **REFUTED** (evidence), or **UNVERIFIABLE** (why). Per CONFIRMED/UNVERIFIABLE finding it also emits a bar-impact line judged against `config: paths.quality_bar_doc`: `bar impact: none` or `bar impact: BLOCKING — <bar-id> — <consequence>`; when that key is empty it emits `bar impact: n/a (no quality bar configured)`. For trivially checkable claims (one grep, one file read) the orchestrator may verify the *premise* inline — evidence recorded either way — but **never the bar impact**: a finding whose premise was verified inline still needs a verifier-produced bar-impact line before it can be deferred or dismissed.
+2. **Verify every deduped finding.** Dispatch `findings-verifier` subagent(s) (tier `standard`, read-only — never override its model). Prompts lead with `config: review.required_preamble`, carry each assigned finding verbatim (id, claim, cited file:line, layer evidence) — never the findings-file path, which the verifier does not read — and name the graph `project` (the slot's `graph_project`, when a graph is configured). The verifier adversarially checks each finding's premise against the actual code — reads the cited file:line, traces the claimed caller/behavior, actively attempts to REFUTE. Verdict per finding: **CONFIRMED** (evidence), **REFUTED** (evidence), or **UNVERIFIABLE** (why). Per CONFIRMED/UNVERIFIABLE finding it also emits a bar-impact line judged against `config: paths.quality_bar_doc`: `bar impact: none` or `bar impact: BLOCKING — <bar-id> — <consequence>`; when that key is empty it emits `bar impact: n/a (no quality bar configured)`. For trivially checkable claims (one grep, one file read) the orchestrator may verify the *premise* inline — evidence recorded either way — but **never the bar impact**: a finding whose premise was verified inline still needs a verifier-produced bar-impact line before it can be deferred or dismissed.
 3. **Silence is a failure, not a pass.** A verifier dispatch counts as FAILED if it errors, returns no report, or covers fewer findings than assigned — an async dispatch that never reports is the same thing. Verification did NOT happen for those findings. On a failed dispatch: retry once; if it fails again, either HALT, or verify the outstanding findings inline with cited evidence and tell the owner explicitly that the pass was a deviation, naming which findings it covered. Never present an unverified finding at Checkpoint 2 without saying so. The verifier has no fallback model, so spend-limit exhaustion is a normal failure mode here — confirm every assigned finding came back before treating the pass as complete.
 4. **REFUTED findings never reach the triage walkthrough.** They are auto-classified dismissed-with-evidence in the findings record and appear at Checkpoint 2 only as one compact "dismissed as false positive (N)" block of one-liners.
 5. **CONFIRMED and UNVERIFIABLE findings proceed to Checkpoint 2** with their verification evidence attached. Genuine layer disagreements (one recommends patch, another defer) are preserved and shown.
@@ -308,7 +316,7 @@ Assemble it from the verified findings plus the triage decisions — verificatio
 
 **Persist the decisions to disk BEFORE dispatching Phase 3.** Append a `## Triage decisions — <YYYY-MM-DD>` section to the story's findings file carrying all three lists verbatim: the full `approved_patches` manifest, the `deferred_findings`, and the `dismissed_findings` with their reasons. **`check_phase_dispatch.py` blocks the Phase 3 `story-finalize` dispatch until this section exists** (and until a GREEN `phase-2 tests` record line exists).
 
-Once persisted, Phase 3 can be dispatched from a fresh session using the findings file alone — a safe context-clear boundary. Until persisted, triage exists only in the conversation.
+Once persisted, Phase 3 can be dispatched from a fresh session using the findings file's `## Triage decisions` section alone — a safe context-clear boundary. Until persisted, triage exists only in the conversation.
 
 ---
 
@@ -324,11 +332,11 @@ Pass in the prompt:
 - `approved_patches` (the patch manifest)
 - `deferred_findings`
 - `dismissed_findings` (the subagent ignores these)
-- `round` (`1`; `2` for the Round 2 re-run, which amends the close-out commit)
+- `round` (`1`; `2` for the Round 2 re-run; `gate-fix` for a pre-merge gate fix — both amend the close-out commit)
 
 The subagent applies patches in one pass, checks stack logs, re-runs scoped tests (batch-fix), writes deferred items to `<config: paths.deferred_work_dir>/story-<id>.md`, and adds AT MOST ONE close-out commit (only if patches OR defers landed). The impl commit was already made by `story-impl`. It does NOT merge.
 
-When Round 2 triggers, Phase 3 runs a **second time** with the round-2 approved patches and defers, and uses `git commit --amend` to fold the changes into the existing close-out commit. The commit cap (`config: git.max_commits_per_story`) counts commits, not amends.
+When Round 2 triggers, Phase 3 runs a **second time** with round 2's approved patches and defers only — round 1's are already committed — and uses `git commit --amend` to fold the changes into the existing close-out commit. The commit cap (`config: git.max_commits_per_story`) counts commits, not amends.
 
 ---
 
@@ -345,6 +353,45 @@ When triggered:
 3. **Second Phase 3 run.** Re-dispatch `story-finalize` with the round-2 `approved_patches` + `deferred_findings`. It writes new defers under a `## Round 2 — <YYYY-MM-DD>` heading in the existing per-story file, runs scoped tests, and **amends** the close-out commit.
 
 Round 2 runs after Phase 3 because its value — "did the patches work" — requires the patches applied and tested.
+
+---
+
+## Rebase / re-stack — `story-rebase` subagent
+
+Dispatch `story-rebase` whenever the branch must move onto a newer base: onto `config: git.base_branch` (before a review round or the pre-merge gate, or when a file-coupled story merged first), or onto another story's branch (stacking). Never hand a rebase to `story-finalize` or `story-impl`.
+
+Re-check the target tip immediately before dispatching — another story may have merged. Record the dispatch with a `NEXT:` line naming the step the rebase is for (`story_record.py append <story-id> "rebase dispatched onto <target>; NEXT: <step>"`). Pass in the prompt:
+
+- `story_id`, `branch_name`, `worktree_path`, `graph_project`
+- `slot`, `stack_project_name` and its state (up / parked / down)
+- `target` — the ref to rebase onto; for a stack also the old base (`git rebase --onto <target> <old-base>`)
+- the branch's current commits (impl + close-out hashes, base)
+- per-file conflict rules for the files both sides changed (predict them with `git merge-tree`), and the spec sections that govern them
+- `validate: yes | no` — `no` when the stack is parked/down or the orchestrator rebuilds it itself; with `yes`, the scoped test labels
+- `range_diff_path` — where to save the range-diff
+
+The subagent returns the new hashes, every conflict with its resolution, and the stack-affecting files the rebase brought in (dependencies, schema, compose, `config: pipeline.stack_affecting_globs`). A resolution needing a design or scope call comes back as a HALT with file:line and options — relay it to the owner.
+
+---
+
+## Pre-merge gate failure — `story-diagnose` subagent
+
+When `uv run --no-project .workflow/scripts/run_full_suite.py --story-id <id>` reports a failing leg on a story branch, dispatch `story-diagnose` with every failing test of that run in one prompt. Never hand a gate failure to `story-finalize` or `story-impl`. Pass:
+
+- `story_id`, `branch_name`, `worktree_path`, `graph_project`, `stack_project_name`
+- `base` — `git merge-base <config: git.base_branch> <branch_name>`
+- the gate summary: each failing test id per leg with its tail, and any artifact paths it names
+
+Record at dispatch: `uv run --no-project .workflow/scripts/story_record.py append <story-id> "gate diagnosis dispatched: <N> tests in <legs>; NEXT: write the ## Gate fix section, then story-finalize applies it"`.
+
+On return:
+
+- **Every failure `branch`, no HALT:** append the subagent's failures and manifest verbatim to the findings file as `## Gate fix — <YYYY-MM-DD>`. Then dispatch `story-finalize` with `approved_patches` = the manifest rows (state the row count), `deferred_findings` and `dismissed_findings` empty, the failing test labels as the Step 3 scoped tests, and `round: gate-fix`. Record `gate-fix finalize dispatched: G1–G<n>; NEXT: re-run the pre-merge gate`, and re-run the gate once finalize returns.
+- **Any `pre-existing`, `environment` or `unproven` failure, or a HALT:** relay the whole report — mechanisms, evidence, questions — to the owner and wait. Dispatch nothing for that gate run until the owner rules.
+
+Gate-fix patches do not count toward the Round 2 trigger; the gate re-run verifies them.
+
+When the gate passes: `uv run --no-project .workflow/scripts/story_record.py append <story-id> "pre-merge gate GREEN — <legs and counts>, exit 0; NEXT: checkpoint-3 (merge approval)"`.
 
 ---
 

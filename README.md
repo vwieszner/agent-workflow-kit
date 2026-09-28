@@ -5,7 +5,7 @@ A portable, spec-driven, human-gated development workflow for coding agents. It 
 
 | Part | What you get |
 |---|---|
-| Story pipeline | `parallel-dev-wave` → `land-story`: one isolated slot per story (a git worktree, plus an isolated compose stack if you want one), tests-first implementation, layered review, verified findings, owner triage, a close-out commit, owner-approved merge, post-merge smoke, cleanup. |
+| Story pipeline | `parallel-dev-wave` → `land-story`: one isolated slot per story (a git worktree, plus an isolated compose stack if you want one), tests-first implementation, layered review, verified findings, owner triage, a close-out commit, `story-rebase` for moving a branch onto a newer base, `story-diagnose` for root-causing a failing pre-merge gate, owner-approved merge, post-merge smoke, cleanup. |
 | Unattended loop | `auto-dev-loop`: the same pipeline without human checkpoints. The next story comes from `milestone-blockers`. Every operation it is pre-authorized for is listed explicitly. |
 | Review | `layered-review` with the `blind-hunter`, `edge-case-hunter` and `acceptance-auditor` layers; `findings-verifier` for adversarial verification; `findings-evaluator` (auto-dev-loop only). |
 | Guards | Hooks that block force-push, `--no-verify`, host installs and configured forbidden commands. They also enforce the review preamble and the no-iterate dispatch phrasing, the phase gates (spec approved → impl; merge approved → land), graph-query hygiene and read-only database MCPs. |

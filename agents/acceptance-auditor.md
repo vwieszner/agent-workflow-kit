@@ -3,7 +3,7 @@ name: acceptance-auditor
 description: Code-review layer 3 — spec compliance. Reviews the supplied diff against the story spec and context docs for AC violations, spec-intent deviations, missing specified behavior, and spec-vs-code contradictions, with read (+ optional graph) access to verify premises in actual code. Reports findings only; never edits anything. Dispatched by the layered-review skill step 2 (full mode only) — do not invoke directly.
 mode: subagent
 tier: deep
-effort: xhigh
+effort: high
 tools: [read, grep, glob, graph]
 readonly: true
 ---

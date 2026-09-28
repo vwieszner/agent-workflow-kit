@@ -8,7 +8,7 @@ not the shell. Switch: `config: guards.agent_source_read`. Skipped entirely when
 
 Deny (JSON permissionDecision) only when ALL hold:
   * the caller's `agent_type` is in `config: guards.source_read_gated_agents`
-    (default story-impl, story-finalize);
+    (default story-impl, story-finalize, story-diagnose);
   * a pipeline segment's FIRST word is a read verb (cat head tail sed more less);
   * one of that segment's own arguments ends in a source suffix
     (`config: guards.source_suffixes`).
@@ -57,7 +57,7 @@ def offending_path(segment: str, suffixes: tuple[str, ...]) -> str | None:
 def evaluate(payload: dict) -> int:
     if str(g.cfg("graph.tool", "none")) == "none":
         return 0
-    gated = set(g.cfg_list("guards.source_read_gated_agents", ["story-impl", "story-finalize"]))
+    gated = set(g.cfg_list("guards.source_read_gated_agents", ["story-impl", "story-finalize", "story-diagnose"]))
     agent = payload.get("agent_type")
     if agent not in gated:
         return 0
