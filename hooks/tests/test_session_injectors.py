@@ -99,6 +99,21 @@ class WriteHandoffTests(HookTestCase):
         content = marker.read_text(encoding="utf-8")
         self.assertTrue(content.startswith("1|Write current session state to "), content)
 
+    def test_noop_when_retro_running(self):
+        marker = self.root / "ran.txt"
+        script = self.root / "fake_agent.py"
+        script.write_text("import sys\nopen(sys.argv[1],'w').write('ran')\n", encoding="utf-8")
+        cmd = f"{Path(sys.executable).as_posix()} {script.as_posix()} {marker.as_posix()} {{prompt}}"
+        (self.root / ".workflow" / "config.toml").write_text(
+            BASE_CONFIG + f"\n[session]\nhandoff_cmd = {cmd!r}\n".replace("'", '"'), encoding="utf-8")
+        os.environ["WORKFLOW_RETRO_RUNNING"] = "1"
+        try:
+            p = self.run_hook(SESSION / "write_handoff.py", '{"session_id": "s1"}', ["--tool", "claude"])
+        finally:
+            os.environ.pop("WORKFLOW_RETRO_RUNNING", None)
+        self.assertEqual(0, p.returncode)
+        self.assertFalse(marker.exists(), "handoff writer ran inside the retrospective analyst")
+
     def test_noop_when_headless(self):
         env_backup = os.environ.get("WORKFLOW_HEADLESS")
         mod = load("write_handoff")

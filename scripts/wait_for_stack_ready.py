@@ -135,9 +135,14 @@ def main() -> int:
                     print("  (that script passes ALL port env vars -- do NOT use a bare "
                           "`compose up`, which silently remaps onto the shared slot's ports)")
                     return 3
-                print(f"[{ts()}] {args.stack}: up (ready_at={ready_at})"
-                      + (" -- liveness NOT confirmed (engine query failed)" if missing is None
-                         else " -- liveness confirmed"))
+                if missing is None:
+                    note = " -- liveness NOT confirmed (engine query failed)"
+                elif not expected:
+                    note = (" -- liveness NOT verified (config: stack.services is empty; "
+                            "nothing to count)")
+                else:
+                    note = " -- liveness confirmed"
+                print(f"[{ts()}] {args.stack}: up (ready_at={ready_at}){note}")
                 return 0
             if status.get("status") == "failed":
                 print(f"[{ts()}] {args.stack}: FAILED -- {status.get('error')}")

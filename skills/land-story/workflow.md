@@ -40,7 +40,7 @@ If the merge reports a conflict: HALT, surface the conflicting files, do NOT aut
 
 ## Step 3 — Post-merge smoke check
 
-Invoke the `post-merge-smoke` skill — it runs `.workflow/scripts/post_merge_smoke.py` against the shared slot (`config: slots.shared_slot`). There is no post-merge-smoke agent; never dispatch one.
+Invoke the `post-merge-smoke` skill — it runs `.workflow/scripts/post_merge_smoke.py` against the shared slot (`config: slots.shared_slot`): service state, the log scan, and the source-sync gate (E), which hash-checks that the containers serve the merge's own files. There is no post-merge-smoke agent; never dispatch one.
 
 If the smoke surfaces a failure clearly caused by the merge (e.g. a new env var not picked up by a running container, a new dependency missing from an image): apply its recommended fix (recreate / rebuild) before proceeding. Destructive fixes are run by hand after reading the diagnosis — the script never applies them.
 

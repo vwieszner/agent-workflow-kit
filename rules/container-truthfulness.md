@@ -41,7 +41,9 @@ stack.
 
 - **Always use `-a` when diagnosing:**
   `{compose} -p <stack> ps -a --format "{{.Service}}\t{{.State}}\t{{.Status}}"`
-- **Recover with `start`, not `up`:** `{compose} -p <stack> start <services...>`. `up` can recreate
+- **Recover with `start`, not `up`:** `{compose} -p <stack> start <services...>`. For the shared stack
+  use `uv run --no-project .workflow/scripts/start_slot0.py`, which does this with every port var and
+  waits until the app service runs. `up` can recreate
   containers and needs every port env var (`config: stack.ports`); `start` cannot remap ports.
 - **`compose watch` does not survive a host restart** (it is a foreground process). After any reboot:
   restart the stack → verify sync (`.workflow/scripts/check_container_sync.py`) before trusting any

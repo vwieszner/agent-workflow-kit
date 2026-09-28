@@ -38,7 +38,14 @@ readonly: false
 uv run --no-project .workflow/scripts/run_full_suite.py [--story-id <story_id>]
 ```
 
-Run it as a background command whose output streams to a file (not into your tool result), and capture that output file's path.
+Run it in the background with its output streamed to a file (not into your tool result), and capture that file's path. Use the tool's background mode where it has one; otherwise the POSIX form:
+
+```bash
+out="$(mktemp)"; nohup uv run --no-project .workflow/scripts/run_full_suite.py [--story-id <story_id>] > "$out" 2>&1 &
+echo "$out"
+```
+
+With `config: stack.runtime = "none"` the gate runs the rendered test commands without a slot stack; its preflight prints SKIPPED for the stack checks — report that, not a stack failure.
 
 ### Step 3 — Wait for completion (explicit polling)
 

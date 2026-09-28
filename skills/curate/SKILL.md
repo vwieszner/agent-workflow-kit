@@ -29,8 +29,11 @@ owner approval. Full rule: `.workflow/rules/script-artifact-curation.md`.
    - **agent** → **confirm the `tools`, `readonly` and `tier` frontmatter with the owner before
      writing** (agents carry tool access). Write the draft in kit agent source format to
      `<config: curation.agent_source_dir>/<name>.md` (default `.workflow/agents/`), then render it
-     into the installed tool dirs:
-     `uv run --no-project .workflow/scripts/install.py render-agent <config: curation.agent_source_dir>/<name>.md`
+     into each installed tool's agent dir (run the line for every tool the project has — a
+     `.claude/agents/` dir means claude, a `.opencode/agents/` dir means opencode):
+     `uv run --no-project .workflow/scripts/install.py render-agent <config: curation.agent_source_dir>/<name>.md --tool claude --out .claude/agents/<name>.md`
+     `uv run --no-project .workflow/scripts/install.py render-agent <config: curation.agent_source_dir>/<name>.md --tool opencode --out .opencode/agents/<name>.md`
+     Confirm each output file exists afterwards — without `--out` the command only prints.
      Never hand-write the rendered `.opencode/agents/` / `.claude/agents/` files.
    - **rule** → create `.workflow/rules/local/<name>.md`; add a row to
      `.workflow/rules/local/INDEX.md`; if the rule is always-on, add its short form plus a

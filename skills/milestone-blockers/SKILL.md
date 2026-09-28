@@ -94,8 +94,11 @@ with X" clause, a dev note) that never reached `deps`.
 
 ```bash
 grep -rlE "(^|[^[:alnum:].-])(<dotted-id>|<dashed-id>)([^[:alnum:]]|$)" <config: paths.specs_dir> \
-  | grep -v "/<dashed-id>-"
+  | grep -vE "/(<dashed-id>|<dotted-id>)[-.]"
 ```
+
+(Escape the dots of `<dotted-id>` in both patterns — `7\.5`, not `7.5`. The `grep -vE` drops the
+story's own spec and per-story artifacts under either id form.)
 
 For each hit, **read the matching line** and classify it:
 

@@ -131,6 +131,18 @@ class ScopedCliTests(unittest.TestCase):
         self.assertEqual(code, 2, out)
         self.assertIn("INFRA-ERROR", out)
 
+    def test_missing_required_flag_is_a_config_error(self):
+        self._setup('[tests_policy]\nrequired_flags = ["--noinput"]\n')
+        code, out = self._main("green")
+        self.assertEqual(code, 2, out)
+        self.assertIn("CONFIG-ERROR", out)
+        self.assertIn("--noinput", out)
+
+    def test_present_required_flag_runs(self):
+        self._setup('[tests_policy]\nrequired_flags = ["runner.py"]\n')
+        code, out = self._main("green")
+        self.assertEqual(code, 0, out)
+
     def test_unset_scoped_cmd_is_exit_two(self):
         te.enter(self, "")
         code, out = self._main("anything")

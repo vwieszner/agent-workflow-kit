@@ -23,6 +23,7 @@ readonly: false
 - `deferred_findings` — findings the owner classified **defer**, each with its verifier `bar impact:` line
 - `dismissed_findings` — classified **dismiss** (no action; ignored)
 - `round` — `1`, `2` for a Round 2 run, or `gate-fix` for a pre-merge gate fix (both amend the close-out)
+- `scoped_labels` — the test labels Step 3 runs; required for `gate-fix` (the failing gate tests), optional otherwise
 
 ## Hard rules in force
 
@@ -75,7 +76,7 @@ If `config: stack.runtime = "none"`, state "stack log check skipped — stack.ru
 
 ### Step 3 — Run scoped tests (batch-fix)
 
-Re-run the same story-scoped tests the impl agent ran:
+Run `scoped_labels` when the prompt gives them (always for `gate-fix`); otherwise re-run the same story-scoped tests the impl agent ran:
 
 ```bash
 uv run --no-project .workflow/scripts/run_scoped_tests.py --project-name <stack_project_name> <story-scoped-labels>
@@ -90,7 +91,7 @@ uv run --no-project .workflow/scripts/story_record.py append <story_id> \
   "phase-3 tests GREEN — <test labels run> (round <N>, <M> tests, exit 0)"
 ```
 
-**Include the exit code** — the count is the claim, the exit code is the result. GREEN is load-bearing: `story_record.py check` requires a positive verdict. Without this line, Checkpoint 3 has no durable test evidence.
+**Include the exit code** (`.workflow/rules/verify-ground-truth.md`) — the count is the claim, the exit code is the result. GREEN is load-bearing: `story_record.py check` requires a positive verdict. Without this line, Checkpoint 3 has no durable test evidence.
 
 ### Step 4 — Write deferred findings to the per-story file
 

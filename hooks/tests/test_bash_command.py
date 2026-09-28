@@ -39,6 +39,13 @@ ALLOWED = [
     ("forward-slash windows path", "ls C:/work/demo"),
     ("find -exec escape", "find . -name '*.tmp' -exec rm {} \\;"),
     ("makemigrations --check", "docker compose exec -T backend python manage.py makemigrations --check"),
+    ("git reset --soft", "git reset --soft HEAD~1"),
+    ("reset --hard inside a commit message", 'git commit -m "document git reset --hard"'),
+    ("recursive delete inside the repo", "rm -rf build/tmp"),
+    ("recursive delete of a variable path", 'rm -rf "$WORKDIR"'),
+    ("non-recursive rm of a system file", "rm /etc/hosts.bak"),
+    ("recursive delete in a temp scratch dir", "rm -rf /tmp/claude-501/scratch/x"),
+    ("rm inside a container", "docker compose exec -T backend rm -rf /app/tmp"),
 ]
 
 FORBIDDEN = [
@@ -68,6 +75,19 @@ FORBIDDEN = [
     ("unquoted drive path", "ls C:\\work\\demo"),
     ("unquoted seg\\seg path", "cat .claude\\hooks\\x.cmd"),
     ("project command_deny rule", "python3 manage.py makemigrations"),
+    ("git reset --hard", "git reset --hard HEAD~3"),
+    ("git -C reset --hard", "git -C ../wt reset --hard origin/development"),
+    ("git filter-branch", "git filter-branch --tree-filter x HEAD"),
+    ("git update-ref -d", "git update-ref -d refs/heads/story/x"),
+    ("rm -rf /", "rm -rf /"),
+    ("rm -fr root glob", "rm -fr /*"),
+    ("rm -r home", "rm -r ~"),
+    ("rm --recursive $HOME", "rm --recursive --force $HOME/projects"),
+    ("sudo rm -rf system dir", "sudo rm -rf /usr/local"),
+    ("rm -rf the repo root", "rm -rf ."),
+    ("rm -rf escaping the repo via ..", "rm -rf ../../other"),
+    ("rm -rf a drive root", "rm -rf C:/"),
+    ("rm -rf the whole temp dir", "rm -rf /tmp"),
 ]
 
 
@@ -89,10 +109,31 @@ class BashCommandCorpus(HookTestCase):
 
 
 class BashCommandDefaults(HookTestCase):
-    """No project lists configured: bare python is allowed, built-in rules still hold."""
+    """No project lists configured: built-in rules still hold."""
 
-    def test_bare_python_allowed_without_host_forbidden(self):
-        self.assertEqual(ALLOW, self.exit_code(HOOK, {"tool_name": "Bash", "tool_input": {"command": "python x.py"}}))
+    def run_cmd(self, cmd):
+        return self.exit_code(HOOK, {"tool_name": "Bash", "tool_input": {"command": cmd}})
+
+    def test_bare_python_denied_when_app_runs_in_container(self):
+        self.assertEqual(DENY, self.run_cmd("python x.py"))
+        self.assertEqual(DENY, self.run_cmd("python3 -c 'print(1)'"))
+        self.assertEqual(ALLOW, self.run_cmd("uv run --no-project scripts/x.py"))
+        self.assertEqual(ALLOW, self.run_cmd("python3 .workflow/hooks/guards/bash_command.py"))
+
+    def test_bare_python_allowed_when_app_runs_on_host(self):
+        self.write_config("[env]\napp_runs_in_container = false\n")
+        self.assertEqual(ALLOW, self.run_cmd("python x.py"))
+
+    def test_project_python_allowed(self):
+        self.write_config('[env]\nproject_python = "python3.12"\n')
+        self.assertEqual(ALLOW, self.run_cmd("python3.12 -m mytool"))
+        self.assertEqual(DENY, self.run_cmd("python3 -m mytool"))
+
+    def test_recursive_delete_allowlist_from_config(self):
+        self.write_config('[guards]\nrecursive_delete_allowed = ["/data/scratch"]\n')
+        self.assertEqual(ALLOW, self.run_cmd("rm -rf /data/scratch/run1"))
+        self.assertEqual(DENY, self.run_cmd("rm -rf /data/scratch"))
+        self.assertEqual(DENY, self.run_cmd("rm -rf /tmp/claude-1/x"))
 
     def test_builtin_rules_hold(self):
         for cmd in ("git push --force origin story/x", "pip install x", "git commit --no-verify -m x"):

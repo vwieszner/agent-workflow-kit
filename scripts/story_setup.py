@@ -212,7 +212,7 @@ def main() -> None:
     ports_line = " ".join(f"{k}={v}" for k, v in ports.items()) or "<none declared>"
 
     # -------------------------------------------------------------- 3) worktree
-    base = str(wfconfig.get("git.base_branch", "main"))
+    base = str(wfconfig.get("git.base_branch", "development"))
     if worktree.exists():
         print(f"story-setup: worktree already exists at {worktree} -- reusing")
     else:
@@ -302,7 +302,8 @@ def main() -> None:
 
     # ---------------------------------------------------------------- 8) report
     print()
-    print("===== story-setup launched (async bring-up running) =====")
+    print("===== story-setup launched (async bring-up running) ====="
+          if bg_pid else "===== story-setup complete (no stack bring-up) =====")
     print(f"slot:               {slot}")
     print(f"story_id:           {args.story_id}")
     print(f"branch:             {branch}")

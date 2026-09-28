@@ -96,17 +96,23 @@ python3 -m unittest discover -s agent-workflow-kit/hooks/tests -p 'test_*.py'
 
 ## Known limitations
 
-- **OpenCode plugin is not type-checked or run.** It was written against the OpenCode `dev`
-  plugin/SDK sources (hook names and payload shapes are cited in its header), but neither Bun nor
-  tsc has compiled it. Session-context injection uses the `experimental.chat.system.transform`
-  hook, and compaction uses `experimental.session.compacting`; both are experimental APIs.
-- **OpenCode's skill tool carries no arguments**, so the phase guard cannot see the story id when
-  `land-story` is invoked. The skill checks the merge approval itself
+- **The OpenCode plugin is type-checked, not run.** `adapters/opencode/plugins/workflow-hooks.ts`
+  compiles under strict `tsc` against `@opencode-ai/plugin` 1.18.33 and its hooks object is checked
+  with `satisfies Hooks` (`npm run typecheck` in `adapters/opencode/` after installing its dev
+  dependencies). It has not been exercised inside a running OpenCode. Session-context injection
+  (`experimental.chat.system.transform`) and compaction (`experimental.session.compacting`) use
+  experimental APIs.
+- **OpenCode's skill tool carries no arguments.** The plugin passes the session's latest user
+  message as the skill args, so the phase guard sees a story id only when that message names it
+  ("land story 1-2"). `land-story` also checks the merge approval itself
   (`story_record.py check <id> checkpoint-3`) as its first step.
-- **OpenCode exposes every shell as `bash`.** Set `WORKFLOW_OPENCODE_SHELL=powershell` to apply the
-  PowerShell guard instead.
-- **OpenCode journaling** captures tool calls and user text from plugin events. It does not
-  capture interrupts.
+- **OpenCode exposes every shell as the `bash` tool.** The plugin follows OpenCode's own shell
+  choice — config `shell`, else `$SHELL`, else PowerShell on Windows — and applies the PowerShell
+  guard for pwsh/powershell and the Bash guard otherwise. `WORKFLOW_OPENCODE_SHELL` overrides it.
+  A `cmd` shell gets no shell guard.
+- **OpenCode journaling** records tool calls (including `apply_patch` file writes), user
+  messages, and interrupts (`session.error` with `MessageAbortedError`). Subagent turns go to
+  `<parent>.sub-<agent>.jsonl` only when OpenCode reports the child session's parent.
 - **OpenCode has no per-dispatch model override**, so `models.fallback.opencode.deep` only applies
   where an adapter supports it; the retry otherwise runs on the agent's configured model.
 - `trace_port.py` and the Docker paths of the lifecycle scripts have not been run against a live

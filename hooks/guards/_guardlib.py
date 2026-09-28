@@ -14,8 +14,11 @@ Each guard is switched by `config: guards.<name>` (default true). `run()` checks
 from __future__ import annotations
 
 import json
+import os
+import posixpath
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -225,3 +228,227 @@ def command_deny_violations(cmd: str) -> list[str]:
         except re.error:
             continue
     return out
+
+
+def git_violations(cmd: str) -> list[str]:
+    """git push / commit discipline — shared by the Bash and PowerShell guards."""
+    out: list[str] = []
+    main = str(cfg("git.main_branch", "main"))
+    base = str(cfg("git.base_branch", "development"))
+    protected = cfg_list("guards.protected_branches") or [main, base, "master"]
+    prefix = str(cfg("git.branch_prefix", "story/"))
+    prot_alt = "|".join(re.escape(b) for b in dict.fromkeys(protected) if b)
+
+    if re.search(r"git\s+push[^|;&]*(--force|--force-with-lease|-f\s|-f$)", cmd, re.IGNORECASE):
+        out.append("[git-push] force-push detected. Forbidden unless the owner explicitly "
+                   "authorizes it. Use a non-force push.")
+
+    if prot_alt and re.search(
+        rf"git\s+push[^|;&]*\s(origin|upstream)\s+({prot_alt})(\s|$|:)", cmd, re.IGNORECASE,
+    ):
+        out.append(f"[git-push] push to a protected branch ({', '.join(protected)}). Forbidden "
+                   "unless the owner explicitly authorizes the push.")
+
+    if re.search(r"(^|[;&|]\s*)git\s+push\s*($|[;&|]|--[a-z])", cmd, re.IGNORECASE | re.MULTILINE):
+        if not re.search(rf"git\s+push[^|;&]*\s(origin|upstream)\s+{re.escape(prefix)}",
+                         cmd, re.IGNORECASE):
+            out.append(f"[git-push] generic 'git push' without an explicit {prefix}<branch> "
+                       f"target. Do not push unless the owner authorizes it; to push a story "
+                       f"branch write 'git push origin {prefix}<id>' explicitly.")
+
+    if re.search(r"git\s+commit[^|;&]*--no-verify", cmd, re.IGNORECASE):
+        out.append("[git-commit] '--no-verify' skips pre-commit hooks. Forbidden unless the "
+                   "owner explicitly authorizes it. Fix the underlying hook failure instead.")
+    if re.search(r"git\s+commit[^|;&]*--no-gpg-sign", cmd, re.IGNORECASE):
+        out.append("[git-commit] '--no-gpg-sign' bypasses commit signing. Forbidden unless "
+                   "the owner explicitly authorizes it.")
+    return out
+
+
+# `git` plus any global options (`-C <dir>`, `-c k=v`, `--no-pager`) before the subcommand.
+_GIT = r"\bgit(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?))*\s+"
+DESTRUCTIVE_RULES = [
+    (re.compile(_GIT + r"reset\b[^|;&\n]*\s--hard\b", re.IGNORECASE),
+     "[git-reset-hard] 'git reset --hard' discards uncommitted work irrecoverably."),
+    (re.compile(_GIT + r"filter-branch\b", re.IGNORECASE),
+     "[git-filter-branch] 'git filter-branch' rewrites history."),
+    (re.compile(_GIT + r"update-ref\b[^|;&\n]*\s-d\b", re.IGNORECASE),
+     "[git-update-ref] 'git update-ref -d' deletes a ref outside the normal branch commands."),
+    (re.compile(r"\bFormat-Volume\b", re.IGNORECASE),
+     "[format-volume] 'Format-Volume' erases a volume."),
+    (re.compile(r"\bClear-Disk\b", re.IGNORECASE),
+     "[clear-disk] 'Clear-Disk' erases a disk."),
+]
+
+
+def destructive_violations(cmd: str) -> list[str]:
+    """Built-in never-run commands (both shells). Quoted text is ignored."""
+    residue = unquoted_residue(cmd)
+    return [f"{msg} Forbidden for agents; if intended, the owner runs it from their own shell."
+            for rx, msg in DESTRUCTIVE_RULES if rx.search(residue)]
+
+
+def _segments(cmd: str) -> list[str]:
+    """Host command segments of `cmd`, split on unquoted `;` `&&` `||` `|` `&` only
+    (not newlines), returned as ORIGINAL text so quoted arguments survive."""
+    residue = unquoted_residue(cmd)
+    out, start = [], 0
+    for m in SEGMENT_SPLIT_NO_NL.finditer(residue):
+        out.append(cmd[start:m.start()])
+        start = m.end()
+    out.append(cmd[start:])
+    return [s.strip() for s in out if s.strip()]
+
+
+_PY = r"python3?(?:\.\d+)?(?:\.exe)?"
+BARE_PYTHON = re.compile(rf"^{_PY}(?=\s|$)", re.IGNORECASE)
+# A stdlib-only kit script (`python3 .workflow/scripts/x.py`) is sanctioned tooling.
+KIT_SCRIPT = re.compile(rf"^{_PY}\s+(?:-\S+\s+)*[\"']?(?:\./)?\.workflow[\\/](?:scripts|hooks)[\\/]",
+                        re.IGNORECASE)
+
+
+def host_python_violations(cmd: str, strip_call_operator: bool = False) -> list[str]:
+    """Bare `python`/`python3` on the host when `config: env.app_runs_in_container` is true.
+    Allowed: container segments, `uv run ...`, the configured `env.project_python`, and
+    `.workflow/` kit scripts (stdlib-only tooling)."""
+    if not cfg("env.app_runs_in_container", True):
+        return []
+    project_python = str(cfg("env.project_python", "") or "").strip()
+    for seg in _segments(cmd):
+        if is_container_segment(seg):
+            continue
+        s = re.sub(r"^sudo\s+", "", seg)
+        if strip_call_operator:
+            s = re.sub(r"^&\s+", "", s)
+        if project_python and s.startswith(project_python):
+            continue
+        if BARE_PYTHON.search(s) and not KIT_SCRIPT.search(s):
+            runner = str(cfg("env.host_tooling_runner", "uv run --no-project") or "")
+            where = (f"the project interpreter '{project_python}'" if project_python
+                     else "the app container (`<compose> exec -T <service> python ...`)")
+            return [f"[host-python] bare '{s.split()[0]}' on the host: '{s[:120]}'. The app runs "
+                    f"in a container (config env.app_runs_in_container). Run standalone tooling "
+                    f"with '{runner} <script>', project-importing code with {where}."]
+    return []
+
+
+# ------------------------------------------------------------------ recursive delete
+
+RM_CMD = re.compile(r"^(?:sudo\s+)?rm(?=\s|$)", re.IGNORECASE)
+RM_RECURSIVE_FLAG = re.compile(r"^(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)$")
+PS_DELETE_CMD = re.compile(r"^(?:&\s+)?(?:Remove-Item|ri|rm|rmdir|rd|del|erase)(?=\s|$)",
+                           re.IGNORECASE)
+PS_RECURSE_FLAG = re.compile(r"^-Rec(?:u(?:r(?:s(?:e)?)?)?)?(?::\$true)?$", re.IGNORECASE)
+PS_PATH_OPT = re.compile(r"^-(?:LiteralPath|Path|LP|PSPath)(?::(.+))?$", re.IGNORECASE)
+_TOKEN = re.compile(r"\"[^\"]*\"|'[^']*'|\S+")
+_HOME_VARS = re.compile(r"^(?:\$HOME|\$\{HOME\}|\$env:(?:USERPROFILE|HOMEPATH|HOME))(?=$|[\\/])",
+                        re.IGNORECASE)
+
+
+def _norm(p: str) -> str:
+    """Lexically normalized, lower-cased, forward-slashed path with a trailing '/'."""
+    p = p.replace("\\", "/")
+    drive = ""
+    m = re.match(r"^([A-Za-z]:)(.*)$", p)
+    if m:
+        drive, p = m.group(1), m.group(2) or "/"
+    p = posixpath.normpath(p) if p else "/"
+    return (drive + p).rstrip("/").lower() + "/"
+
+
+def _is_absolute(p: str) -> bool:
+    return bool(re.match(r"^(?:/|\\\\|[A-Za-z]:(?:[\\/]|$))", p))
+
+
+def _temp_bases() -> list[str]:
+    bases = {_norm(tempfile.gettempdir())}
+    if os.name != "nt":
+        bases.update({"/tmp/", "/private/tmp/"})
+    return sorted(bases)
+
+
+def delete_allowed_roots() -> list[str]:
+    """Roots a recursive delete must stay STRICTLY inside. Configured, or by default the
+    repo root, the worktrees root, and `claude*`/`workflow*` dirs of the system temp dir."""
+    roots = cfg_list("guards.recursive_delete_allowed")
+    if roots:
+        return [_norm(str(wfconfig.render(str(r)))) for r in roots]
+    return [_norm(str(wfconfig.repo_root())), _norm(str(wfconfig.worktrees_root()))]
+
+
+def _under_temp_scratch(norm: str) -> bool:
+    for base in _temp_bases():
+        if norm.startswith(base):
+            first = norm[len(base):].split("/", 1)[0]
+            if first.startswith(("claude", "workflow")) and len(norm) > len(base) + len(first) + 1:
+                return True
+    return False
+
+
+def _delete_targets(seg: str, powershell: bool) -> list[str] | None:
+    """Target arguments of a recursive delete in `seg`, or None if `seg` is not one."""
+    toks = [t.strip("\"'") for t in _TOKEN.findall(seg)]
+    if not toks:
+        return None
+    head = " ".join(toks[:2])
+    is_rm = bool(RM_CMD.match(head))
+    is_ps = powershell and bool(PS_DELETE_CMD.match(head))
+    if not (is_rm or is_ps):
+        return None
+    args = toks[1:]
+    if toks[0].lower() in ("sudo", "&"):
+        args = toks[2:]
+    recursive, targets = False, []
+    for a in args:
+        if is_rm and RM_RECURSIVE_FLAG.match(a):
+            recursive = True
+        elif is_ps and PS_RECURSE_FLAG.match(a):
+            recursive = True
+        elif is_ps and PS_PATH_OPT.match(a):
+            val = PS_PATH_OPT.match(a).group(1)
+            if val:
+                targets.append(val.strip("\"'"))
+        elif a.startswith("-") or a == "--":
+            continue
+        elif is_ps:
+            targets.extend(t.strip() for t in a.split(",") if t.strip())
+        else:
+            targets.append(a)
+    return targets if recursive else None
+
+
+def recursive_delete_violations(cmd: str, cwd: str, powershell: bool = False) -> list[str]:
+    """Recursive delete whose target is not strictly inside an allowed root. Checked:
+    `/`, drive roots, `~`/`$HOME`, relative targets resolved against `cwd` (so `..`
+    escapes are caught), absolute literals. Other variable-based targets are trusted."""
+    roots: list[str] | None = None
+    home = _norm(os.path.expanduser("~"))
+    for seg in _segments(cmd):
+        if is_container_segment(seg):
+            continue
+        targets = _delete_targets(seg, powershell)
+        if not targets:
+            continue
+        roots = roots if roots is not None else delete_allowed_roots()
+        for t in targets:
+            if t == "~" or t.startswith(("~/", "~\\")) or _HOME_VARS.match(t):
+                rest = re.sub(r"^(?:~|\$HOME|\$\{HOME\}|\$env:\w+)", "", t, flags=re.IGNORECASE)
+                norm = _norm(home.rstrip("/") + "/" + rest.lstrip("\\/"))
+            elif t.startswith(("$", "%")):
+                continue  # other variable-based path: trusted
+            elif _is_absolute(t):
+                norm = _norm(t)
+            else:
+                norm = _norm(cwd.replace("\\", "/").rstrip("/") + "/" + t)
+            ok = any(norm.startswith(r) and len(norm) > len(r) for r in roots)
+            if not ok and not cfg_list("guards.recursive_delete_allowed"):
+                ok = _under_temp_scratch(norm)
+            if not ok:
+                shown = ", ".join(r.rstrip("/") for r in roots)
+                return [f"[recursive-delete] recursive delete of '{t}' (resolves to "
+                        f"'{norm.rstrip('/') or '/'}') outside the allowed roots "
+                        f"(config guards.recursive_delete_allowed): {shown}"
+                        + ("" if cfg_list("guards.recursive_delete_allowed")
+                           else ", <temp>/claude*, <temp>/workflow*")
+                        + ". If intentional, the owner runs it from their own shell."]
+    return []

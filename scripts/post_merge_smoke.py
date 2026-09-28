@@ -17,9 +17,11 @@ after a merge lands on `config: git.base_branch`:
      while executing stale code when `compose watch` has died silently; state
      and log checks cannot see that.
 
-On failure, prints diagnoses: E (stale source), the configured pattern
-diagnoses (`config: smoke.diagnoses`), A2 (the merge touched migrations —
-`config: smoke.migration_*`), D (no pattern recognized: verbatim log dump).
+On failure, prints diagnoses: E (stale source), A (a migration / entrypoint
+failure in the logs — `config: smoke.migration_failure_regex`), the configured
+pattern diagnoses (`config: smoke.diagnoses`), A2 (the merge touched migrations —
+`config: smoke.migration_*`; the merge's first-parent diff, not HEAD's), D (no
+pattern recognized: verbatim log dump).
 Single-shot, deterministic. Never auto-applies destructive fixes (rebuild,
 recreate, `down -v`) — the owner runs those after reviewing the diagnosis.
 
@@ -77,17 +79,22 @@ def sync_pathspecs() -> list[str]:
     return [p or "." for p, _, _ in ccs.load_mounts()]
 
 
-def merged_source_files(repo: Path) -> tuple[list[str], str]:
-    """Tree-relative source paths the most recent merge brought onto the base branch.
+def merge_range(repo: Path) -> tuple[list[str], str]:
+    """(git diff range, label) of the most recent merge onto the base branch.
 
     The MERGE's own first-parent diff, not HEAD's: /land-story lands a bookkeeping
-    commit after the merge, so `HEAD~1..HEAD` would narrow the set to docs.
+    commit after the merge, so `HEAD~1..HEAD` (or `git log -1`) would narrow the set
+    to docs.
     """
     merge_sha = run(["git", "-C", str(repo), "rev-list", "--merges", "-1", "HEAD"]).stdout.strip()
     if merge_sha:
-        rng, label = [f"{merge_sha}^1", merge_sha], f"merge {merge_sha[:7]}"
-    else:
-        rng, label = ["HEAD~1", "HEAD"], "HEAD~1..HEAD (no merge commit found)"
+        return [f"{merge_sha}^1", merge_sha], f"merge {merge_sha[:7]}"
+    return ["HEAD~1", "HEAD"], "HEAD~1..HEAD (no merge commit found)"
+
+
+def merged_source_files(repo: Path) -> tuple[list[str], str]:
+    """Tree-relative source paths the most recent merge brought onto the base branch."""
+    rng, label = merge_range(repo)
     exts = tuple(str(e) for e in (wfconfig.get("smoke.sync_exts", DEFAULT_SYNC_EXTS) or []))
     out = run(["git", "-C", str(repo), "diff", "--name-only", "--diff-filter=d", *rng, "--",
                *sync_pathspecs()])
@@ -164,7 +171,7 @@ def main() -> int:
         print(f"smoke green: {states_line}, no fresh error lines in the last {tail_n} log lines")
         for line in sync_lines:
             print(line)
-        print(f"{wfconfig.get('git.base_branch', 'main')} baseline clean.")
+        print(f"{wfconfig.get('git.base_branch', 'development')} baseline clean.")
         return 0
 
     # ----------------------------------------------------------- failure path
@@ -192,6 +199,23 @@ def main() -> int:
     combined = "\n".join(logs.values())
     any_match = False
 
+    mig_fail_re = str(wfconfig.get("smoke.migration_failure_regex", "") or "")
+    try:
+        mig_fail = re.search(mig_fail_re, combined) if mig_fail_re else None
+    except re.error as e:
+        print(f"[Diagnosis A] invalid config: smoke.migration_failure_regex: {e}")
+        mig_fail = None
+    if mig_fail:
+        any_match = True
+        print("[Diagnosis A] Migration / entrypoint failure")
+        print(f"  Signal: {mig_fail.group(0)}")
+        print("  Root cause: the container's startup migration (or entrypoint) failed on the merged")
+        print("              schema — a wrong field, a missing dependency, or an in-place edit of an")
+        print("              already-applied migration the live DB never re-ran.")
+        print("  Action: surface the log lines; do NOT auto-fix — the reset path (additive column")
+        print("          vs structural rebuild) is the owner's call per the project's schema rule.")
+        print()
+
     for diag in (wfconfig.get("smoke.diagnoses", DEFAULT_DIAGNOSES) or []):
         try:
             m = re.search(str(diag.get("pattern", "")), combined) if diag.get("pattern") else None
@@ -214,12 +238,13 @@ def main() -> int:
     mig_re = str(wfconfig.get("smoke.migration_paths_regex", "") or "")
     touched = []
     if mig_re:
-        touched = [f for f in run(["git", "-C", str(repo), "log", "-1", "--name-only",
-                                   "--pretty=format:"]).stdout.splitlines()
+        rng, mig_label = merge_range(repo)
+        touched = [f for f in run(["git", "-C", str(repo), "diff", "--name-only",
+                                   *rng]).stdout.splitlines()
                    if f.strip() and re.search(mig_re, f)]
     if touched:
         any_match = True
-        print("[Diagnosis A2] Last commit touched migrations - checking live-DB drift")
+        print(f"[Diagnosis A2] The {mig_label} touched migrations - checking live-DB drift")
         plan_cmd = str(wfconfig.get("smoke.migration_plan_cmd", "") or "")
         if not plan_cmd:
             print("  SKIPPED: config: smoke.migration_plan_cmd is empty — inspect the live DB by hand.")

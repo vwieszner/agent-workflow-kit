@@ -44,6 +44,33 @@ class PowerShellTests(HookTestCase):
         self.assertEqual(0, self.ps("Remove-Item -Recurse -Force $worktree"))
         self.assertEqual(0, self.ps("Remove-Item C:\\Users\\someone\\file.txt"))
 
+    def test_recursive_delete_forms(self):
+        self.assertEqual(2, self.ps("Remove-Item -Recurse -Force C:\\"))
+        self.assertEqual(2, self.ps("Remove-Item -Path:C:\\Windows -Recurse"))
+        self.assertEqual(2, self.ps("Remove-Item -LiteralPath 'C:\\Windows' -Recurse -Force"))
+        self.assertEqual(2, self.ps("Remove-Item -Recurse ~"))
+        self.assertEqual(2, self.ps("Remove-Item -Recurse -Force $env:USERPROFILE"))
+        self.assertEqual(2, self.ps("rd -Recurse C:\\work"))
+        self.assertEqual(2, self.ps("rm -rf /"))
+        self.assertEqual(0, self.ps("Remove-Item -Path:C:\\work\\demo\\out -Recurse"))
+
+    def test_git_rules(self):
+        self.assertEqual(2, self.ps("git push --force origin story/x"))
+        self.assertEqual(2, self.ps("git push origin main"))
+        self.assertEqual(2, self.ps("git commit --no-verify -m x"))
+        self.assertEqual(0, self.ps("git push origin story/x"))
+
+    def test_destructive(self):
+        self.assertEqual(2, self.ps("git reset --hard HEAD~1"))
+        self.assertEqual(2, self.ps("Format-Volume -DriveLetter D"))
+        self.assertEqual(2, self.ps("Get-Disk 1 | Clear-Disk -RemoveData"))
+        self.assertEqual(2, self.ps("git update-ref -d refs/heads/x"))
+
+    def test_bare_python_builtin(self):
+        self.write_config("")
+        self.assertEqual(2, self.ps("& python foo.py"))
+        self.assertEqual(0, self.ps("uv run --no-project .workflow/scripts/wfconfig.py get x"))
+
     def test_bash_payload_ignored(self):
         self.assertEqual(0, self.exit_code(PS, {"tool_name": "Bash", "tool_input": {"command": "pip install x"}}))
 
@@ -62,6 +89,16 @@ class ScriptRegistrationTests(HookTestCase):
         p = self.write("scripts/new_tool.py")
         self.assertEqual(0, p.returncode)
         self.assertIn(b"not registered", p.stderr)
+        out = json.loads(p.stdout)["hookSpecificOutput"]
+        self.assertEqual("PostToolUse", out["hookEventName"])
+        self.assertIn("not registered", out["additionalContext"])
+
+    def test_kit_scripts_ignored(self):
+        self.assertEqual(b"", self.write(".workflow/scripts/new_kit_tool.py").stdout)
+
+    def test_missing_index_says_skipped(self):
+        (self.root / "scripts" / "INDEX.md").unlink()
+        self.assertIn(b"SKIPPED", self.write("scripts/new_tool.py").stdout)
 
     def test_registered_script_silent(self):
         self.assertEqual(b"", self.write("scripts/known.py").stderr)

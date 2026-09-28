@@ -5,7 +5,7 @@ mode: subagent
 tier: standard
 effort: max
 tools: [read, grep, glob, bash, graph, monitor]
-readonly: false
+readonly: true
 ---
 
 # Story Diagnose Agent
@@ -21,6 +21,7 @@ readonly: false
 ## Hard rules
 
 - **Change nothing.** No edit to any file in the worktree, no git state change (commit, stash, checkout, reset, rebase), no stack up / down / rebuild, no database drop. Experiments run through `<config: stack.compose_cmd> -p <stack_project_name> exec -T ...` or a script under the system temp dir. `git -C <worktree_path> status --porcelain` must be empty when you return.
+- **No stack** (`config: stack.runtime = "none"`): experiments run on the host through the rendered test commands; say so, and skip Step 1's stack checks (the preflight prints SKIPPED).
 - **Never run the full gate** (`.workflow/scripts/run_full_suite.py`) — the orchestrator re-runs it. Reproduce with scoped runs: `uv run --no-project .workflow/scripts/run_scoped_tests.py --project-name <stack_project_name> <labels>`; a failure that shows only under parallel load with the rendered `config: tests.full_cmd` restricted to its labels; the rendered `config: tests.unit_frontend_cmd` / `config: tests.e2e_cmd` restricted to the failing file or spec.
 - **Copy E2E artifacts first.** An E2E run may wipe its results directory when it starts. Before re-running any E2E spec, copy the gate's artifacts to the system temp dir and read traces from the copy.
 - **Root cause before fix** (`.workflow/rules/root-cause-before-fix.md`). For each failure state *this input → this code path → this wrong state → this observed failure*, every link backed by a command output or a file:line you read. A hypothesis that fits the symptoms is `unproven`. A failure that does not reproduce is `unproven` with the attempts listed — never "flaky".

@@ -146,7 +146,7 @@ resolves first.
 - Read-only during Steps 1–3; writes only in Step 4, after the owner approves each row.
 - Don't broaden scope: the pass is bounded to docs that REFERENCE the changed concepts. Targeted grep
   matches drive the checklist; speculative searches don't.
-- Never move or rename the spec file (e.g. into a "done" folder) — that belongs to `land-story`.
+- Never move or rename the spec file (e.g. into a "done" folder).
 
 ## Exit conditions
 

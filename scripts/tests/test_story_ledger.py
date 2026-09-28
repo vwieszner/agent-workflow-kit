@@ -65,6 +65,21 @@ class LedgerAndRecordTests(unittest.TestCase):
             self.assertEqual(story_record.cmd_check("7-2", "bogus"), 2)
         self.assertEqual(self._run("append", "7-2", "  -  ")[0], 2)
 
+    def test_a_fact_written_before_the_spec_lands_stays_in_the_worktree(self):
+        wt = self.root / "worktrees" / "3-4"
+        wt.mkdir(parents=True)
+        (self.root / SPECS / "slot-registry.md").write_text(
+            "| Slot | Status | Story ID | Branch | Worktree | Since |\n"
+            "|------|--------|----------|--------|----------|-------|\n"
+            f"| 2 | in_use | 3-4 | story/3-4 | {wt} | 2026-01-01 |\n", encoding="utf-8")
+        self.assertEqual(self._run("append", "3-4", "checkpoint-1 spec approved")[0], 0)
+        self.assertTrue((wt / SPECS / "3-4-record.md").is_file(),
+                        "record fell back to the main checkout while the worktree existed")
+        self.assertFalse((self.root / SPECS / "3-4-record.md").exists())
+        (wt / SPECS / "3-4-some-feature.md").write_text("# spec\n", encoding="utf-8")
+        self.assertEqual(self._run("check", "3-4", "checkpoint-1")[0], 0,
+                         "the fact went missing once the worktree's specs dir existed")
+
     def test_negative_verdicts_match_whole_words_only(self):
         self._run("append", "7-2", "phase-2 tests GREEN — sharedRoster rendered, test_error_handling (4 tests)")
         self.assertEqual(self._run("check", "7-2", "phase-2")[0], 0,

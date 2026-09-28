@@ -115,11 +115,11 @@ class ScriptBehaviourTests(unittest.TestCase):
         self.assertFalse(self.hist.exists())
 
     def test_set_rejects_unknown_status_unless_forced(self):
-        code, out = self._run("set", "1-2", "blocked")
+        code, out = self._run("set", "1-2", "shelved")
         self.assertEqual(code, 2, out)
-        code, out = self._run("set", "1-2", "blocked", "--force")
+        code, out = self._run("set", "1-2", "shelved", "--force")
         self.assertEqual(code, 0, out)
-        self.assertIn("1-2-beta: blocked", self.path.read_text(encoding="utf-8"))
+        self.assertIn("1-2-beta: shelved", self.path.read_text(encoding="utf-8"))
 
     def test_set_history_flag_records_detail(self):
         code, _ = self._run("set", "1-2", "in-progress", "--note", "STARTED slot 3",

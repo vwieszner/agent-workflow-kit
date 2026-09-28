@@ -9,7 +9,10 @@ One host script, no sub-agents. Phases, in order:
   1. preflight   `.workflow/scripts/stack_preflight.py --project-name <stack> --worktree <wt>
                  [--expected-branch <b>]` when `config: stack.runtime` != "none"; skipped (and
                  announced) otherwise. A red preflight aborts: suite not run.
-  2. pre-phases  `config: tests.full_pre_phases` ([{name, cmd}]), sequential; the first
+  2. pre-phases  `schema-drift` first — `config: tests.schema_drift_cmd`, run only when a file
+                 changed against `config: git.base_branch` (committed or not) matches
+                 `config: pipeline.schema_globs`; announced as SKIPPED otherwise. Then
+                 `config: tests.full_pre_phases` ([{name, cmd}]), sequential; the first
                  non-zero exit aborts the gate with that exit code.
   3. legs        run CONCURRENTLY, each streamed into the raw log with a `[LABEL]` prefix;
                  one leg failing never stops the others:
@@ -47,12 +50,15 @@ Usage:
 Exit codes:
   0  all green
   1  test failure, preflight failure, pre/post-phase failure, or gate lock not acquired
-  2  configuration error (tests.full_cmd unset) or story not resolvable from the slot registry
+  2  configuration error (tests.full_cmd unset, or missing a `config: tests_policy.required_flags`
+     entry) or story not resolvable from the slot registry
   n  a pre-phase's own non-zero exit code when it aborts the gate
 """
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,7 +71,9 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 import wfconfig  # noqa: E402
 from _named_mutex import NamedMutex, lock_file_for  # noqa: E402
-from run_scoped_tests import fail_regex, parse_output, resolve_target, run_env, summary_regex  # noqa: E402
+from run_scoped_tests import (  # noqa: E402
+    fail_regex, missing_required_flags, parse_output, resolve_target, run_env, summary_regex,
+)
 
 # Host-global on purpose: the collision this prevents is host oversubscription across
 # stacks and projects as much as same-stack state sharing. Tests override LOCK_DIR.
@@ -312,6 +320,51 @@ def _phases(key: str, ctx: dict) -> list[tuple[str, str]]:
     return out
 
 
+def _glob_match(path: str, pattern: str) -> bool:
+    """fnmatch, plus a leading `**/` also matching at the tree root (`migrations/x.py`)."""
+    return fnmatch.fnmatchcase(path, pattern) or (
+        pattern.startswith("**/") and fnmatch.fnmatchcase(path, pattern[3:]))
+
+
+def _changed_files(worktree: str, base: str) -> list[str]:
+    """Files changed against `base`: committed on the branch plus uncommitted edits."""
+    out: set[str] = set()
+    for argv in (["diff", "--name-only", f"{base}...HEAD"], ["diff", "--name-only", "HEAD"]):
+        r = subprocess.run(["git", "-C", worktree, *argv], capture_output=True, text=True,
+                           errors="replace")
+        out.update(ln.strip() for ln in r.stdout.splitlines() if ln.strip())
+    return sorted(out)
+
+
+def _schema_drift_phase(ctx: dict) -> list[tuple[str, str]]:
+    """[("schema-drift", cmd)] when a schema file changed and the check is configured."""
+    tpl = str(wfconfig.get("tests.schema_drift_cmd", "") or "").strip()
+    if not tpl:
+        print("schema-drift: SKIPPED — config: tests.schema_drift_cmd is unset")
+        return []
+    globs = [str(g) for g in (wfconfig.get("pipeline.schema_globs", []) or [])]
+    if not globs:
+        print("schema-drift: SKIPPED — config: pipeline.schema_globs is empty")
+        return []
+    base = str(wfconfig.get("git.base_branch", "development"))
+    hits = [f for f in _changed_files(ctx["worktree"], base)
+            if any(_glob_match(f, g) for g in globs)]
+    if not hits:
+        print(f"schema-drift: SKIPPED — no file matching config: pipeline.schema_globs "
+              f"changed against {base}")
+        return []
+    print(f"schema-drift: {len(hits)} schema file(s) changed against {base} — running the check")
+    return [("schema-drift", wfconfig.render(tpl, **ctx))]
+
+
+def _preflight_launcher(pf: Path) -> list[str]:
+    """The watch check needs psutil on Windows; uv supplies it without a host install."""
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "run", "--no-project", "--with", "psutil", str(pf)]
+    return [sys.executable, str(pf)]
+
+
 def _run_gate(ctx: dict, expected_branch: str, env: dict) -> int:
     worktree = ctx["worktree"]
     # ------------------------------------------------------------- preflight
@@ -321,7 +374,7 @@ def _run_gate(ctx: dict, expected_branch: str, env: dict) -> int:
             print(f"preflight FAILED — {pf} not found; suite not run.")
             return 1
         print("preflight...", flush=True)
-        pf_cmd = [sys.executable, str(pf), "--project-name", str(ctx["stack"]), "--worktree", worktree]
+        pf_cmd = [*_preflight_launcher(pf), "--project-name", str(ctx["stack"]), "--worktree", worktree]
         if expected_branch:
             pf_cmd += ["--expected-branch", expected_branch]
         if subprocess.run(pf_cmd, cwd=worktree, env=env).returncode != 0:
@@ -333,7 +386,7 @@ def _run_gate(ctx: dict, expected_branch: str, env: dict) -> int:
     legs = _configured_legs(ctx)
     expected = [label for label, _ in legs]
     skipped = [label for label, key in LEGS if label not in expected]
-    pre = _phases("tests.full_pre_phases", ctx)
+    pre = _schema_drift_phase(ctx) + _phases("tests.full_pre_phases", ctx)
     post = _phases("tests.full_post_phases", ctx)
     if skipped:
         print(f"legs skipped (not configured): {', '.join(skipped)}")
@@ -395,6 +448,11 @@ def main(argv: list[str] | None = None) -> int:
     ctx, err = resolve_target(args.story_id or None, None)
     if err:
         print(f"ERROR: {err}")
+        return 2
+    missing = missing_required_flags(wfconfig.render(str(wfconfig.get("tests.full_cmd")), **ctx))
+    if missing:
+        print(f"ERROR: tests.full_cmd lacks required flag(s) {', '.join(missing)} "
+              f"(config: tests_policy.required_flags) — suite not run.")
         return 2
     expected_branch = args.expected_branch or (ctx.get("branch", "") if args.story_id else "")
     env = run_env(ctx)

@@ -31,4 +31,5 @@ the OLD schema after the initial migration is edited.
     reset (`config: schema.stack_reset_cmd`, i.e. down with volumes + up with rebuild) on each affected
     stack. Same on the shared stack immediately post-merge.
 - After any migration edit, and before any test run against a live DB, invoke the `dev-preflight`
-  skill to catch live-DB vs on-disk drift.
+  skill (it runs `.workflow/scripts/stack_preflight.py`, the gate) to catch live-DB vs on-disk drift;
+  dispatch the `dev-preflight` subagent only to diagnose a red preflight.

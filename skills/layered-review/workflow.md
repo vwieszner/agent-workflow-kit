@@ -38,7 +38,7 @@ The review layers are `deep`-tier agents (`config: models.<tool>.deep`, set by t
 
 - **Retry once.** A layer that fails is re-dispatched exactly once. If `config: models.fallback.<tool>.deep` is non-empty, the retry passes that model as a dispatch-time model override (Claude Code: the `model` parameter of the Agent dispatch). An empty key — or a tool without a per-dispatch model override — means one retry on the agent's configured model. This is the `parallel-dev-wave` model-fallback policy; keep the two consistent.
 - **Silence is a failure, not a pass.** A layer counts as FAILED if the dispatch errors OR the agent returns no report. An agent that completes and emits nothing is retried exactly like a crashed one, then recorded in `{failed_layers}`. An empty layer never passes silently.
-- When the primary model is known-unavailable for the rest of the session (e.g. a hard spend limit hit earlier), dispatch the fallback directly and record the deviation in the report.
+- When the primary model is known-unavailable for the rest of the session (e.g. a hard spend limit hit earlier): with a fallback configured, dispatch the fallback directly and record the deviation in the report; with none configured, do not re-attempt the layer — mark it failed in `{failed_layers}` and tell the owner.
 
 ## Workflow architecture
 
@@ -59,6 +59,8 @@ Load `.workflow/config.toml` and resolve:
 - `graph_tool` = `config: graph.tool`; `graph_main_project` = `config: graph.main_project`
 - `quality_bar_doc` = `config: paths.quality_bar_doc`
 - `date` = current system date
+- `communication_language` = `config: project.communication_language` — speak to the owner in this language in every step.
 - The project's always-loaded instructions (`AGENTS.md` / `CLAUDE.md`) and `config: paths.lessons` if present.
+- The project-context doc: the first match of `config: paths.project_context` (empty → `**/project-context.md`) if present — load it as project implementation rules for the review. No match is reported, not an error.
 
 Then read fully and follow `./steps/step-01-gather-context.md`.

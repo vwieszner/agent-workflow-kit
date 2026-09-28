@@ -11,12 +11,15 @@ Wiring
 
 Accepted payloads (JSON on stdin)
     1. Claude Code Stop/SubagentStop payload: `session_id`, `transcript_path`, optional
-       `agent_id`. The hook reads the transcript DELTA since a stored byte cursor
-       (.workflow/state/journal/cursors/) — O(delta) per turn.
-    2. Plugin payload: `session_id`, optional `agent_id`, and
+       `agent_id` and `agent_transcript_path`. With `agent_id`, the subagent's own transcript
+       (`agent_transcript_path`) is read when present, else `transcript_path`. The hook reads
+       the transcript DELTA since a stored byte cursor (.workflow/state/journal/cursors/) —
+       O(delta) per turn.
+    2. Plugin payload: `session_id` (the PARENT session for a subagent), optional `agent_id`,
        `workflow_tool_calls: [{"tool": str, "input": str|object, "ok": bool}, ...]`
-       already summarized by the OpenCode plugin. Tool names may be OpenCode-native
-       (`bash`, `write`, `task`, ...) or Claude-shaped (`Bash`, `Write`, `Agent`, ...).
+       already summarized by the OpenCode plugin, `workflow_user_messages: [str, ...]` and
+       `workflow_interrupted: bool`. Tool names may be OpenCode-native (`bash`, `write`,
+       `task`, ...) or Claude-shaped (`Bash`, `Write`, `Agent`, ...).
        When `workflow_tool_calls` is present it wins; `transcript_path` is ignored.
 
 Output (DESIGN §8): one JSON line per turn appended to
@@ -26,8 +29,8 @@ Output (DESIGN §8): one JSON line per turn appended to
      "tool_calls": [{"tool", "input", "ok"}],
      "facts": [{"kind": script_written|script_edited|command_run|skill_invoked|
                 agent_spawned|tool_error|interrupted|user_message, ...}]}
-`facts` is derived from the tool calls (plus user messages / interrupts, transcript mode only)
-and is what the retrospective mines.
+`facts` is derived from the tool calls plus user messages and interrupts, and is what the
+retrospective mines.
 
 Contract: always exits 0 and prints nothing — never blocks a turn, never injects context.
 No-op when WORKFLOW_RETRO_RUNNING is set (inside the retrospective's own analyst run) or
@@ -105,8 +108,10 @@ def _normalize(tool: str, inp) -> dict:
         elif tool == "Skill":
             detail["skill"] = text
         elif tool == "Agent":
-            detail["agent_type"] = text.split(":", 1)[0].strip()
-            detail["desc"] = text
+            # Plugin summaries read "<agent>: <description>".
+            head, sep, rest = text.partition(":")
+            detail["agent_type"] = head.strip()
+            detail["desc"] = rest.strip() if sep else text
         detail["raw"] = text
 
     if tool in CMD_TOOLS:
@@ -149,9 +154,17 @@ def _facts_from_call(call: dict, ts) -> list:
 
 # --------------------------------------------------------------------------- plugin payload
 
-def _from_plugin(raw_calls: list) -> tuple[list, list]:
+def _user_text_ok(text: str) -> bool:
+    return bool(text) and not text.startswith(INJECTION_PREFIXES) and '"hook_event_name"' not in text
+
+
+def _from_plugin(raw_calls: list, user_messages=None, interrupted=False) -> tuple[list, list]:
     calls, facts = [], []
     ts = _now()
+    for text in user_messages if isinstance(user_messages, list) else []:
+        text = str(text or "").strip()
+        if _user_text_ok(text):
+            facts.append({"ts": ts, "kind": "user_message", "text": text[:MAX_TEXT]})
     for item in raw_calls:
         if not isinstance(item, dict):
             continue
@@ -162,6 +175,8 @@ def _from_plugin(raw_calls: list) -> tuple[list, list]:
             call["_error"] = item.get("error")
         calls.append(call)
         facts.extend(_facts_from_call(call, ts))
+    if interrupted:
+        facts.append({"ts": ts, "kind": "interrupted"})
     return calls, facts
 
 
@@ -205,7 +220,7 @@ def _from_transcript_lines(lines: list) -> tuple[list, list]:
         elif t == "user":
             if isinstance(content, str):
                 text = content.strip()
-                if text and not text.startswith(INJECTION_PREFIXES) and '"hook_event_name"' not in text:
+                if _user_text_ok(text):
                     extra.append({"ts": ts, "kind": "user_message", "text": text[:MAX_TEXT]})
             elif isinstance(content, list):
                 for block in content:
@@ -297,11 +312,15 @@ def main() -> int:
 
         tool_calls = payload.get("workflow_tool_calls")
         if isinstance(tool_calls, list):
-            calls, facts = _from_plugin(tool_calls)
+            calls, facts = _from_plugin(tool_calls, payload.get("workflow_user_messages"),
+                                        bool(payload.get("workflow_interrupted")))
             _append(cs, session_id, agent_id, "plugin", calls, facts)
             return 0
 
         transcript_path = payload.get("transcript_path")
+        agent_transcript = payload.get("agent_transcript_path")
+        if agent_id and agent_transcript and os.path.isfile(agent_transcript):
+            transcript_path = agent_transcript
         if not transcript_path or not os.path.isfile(transcript_path):
             return 0
         delta = _read_delta(cs, transcript_path)

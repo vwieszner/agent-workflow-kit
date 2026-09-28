@@ -17,9 +17,12 @@ Usage:
   skills   → .claude/skills (claude|both — OpenCode reads .claude/skills too)
              .opencode/skills (opencode only)
   agents   → rendered into .claude/agents and/or .opencode/agents
-  hooks    → .claude/settings.json hooks merged (claude|both)
+  hooks    → .claude/settings.json hooks + permissions.deny merged (claude|both); the MCP
+             guard matchers are rendered from graph.mcp_server / guards.mcp_readonly_servers
              .opencode/plugins/*.ts + .opencode/package.json deps (opencode|both)
   Existing skills/agents with the same name are SKIPPED (reported) unless --force.
+  Files a previous install wrote (.workflow/.kit-manifest.json) that the kit no longer
+  ships are removed; project-owned files are never in the manifest.
 
 `render-agent` (also available installed as .workflow/scripts/install.py): renders a kit-source
 agent (DESIGN.md §5) for one tool, using the target's .workflow/config.toml for models and MCP
@@ -38,7 +41,11 @@ from pathlib import Path
 from typing import Any
 
 KIT = Path(__file__).resolve().parent
-IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+IGNORE_NAMES = ("__pycache__", "*.pyc", ".DS_Store")
+IGNORE = shutil.ignore_patterns(*IGNORE_NAMES)
+MANIFEST = ".workflow/.kit-manifest.json"
+# Kit-owned hook scripts whose Claude matchers install.py renders from config.
+MCP_GUARDS = ("graph_query.py", "mcp_readonly.py")
 # Always-loaded instruction files (OpenCode `instructions`, Claude CLAUDE.md @imports).
 INSTRUCTION_FILES = [".workflow/AGENTS.md", ".workflow/AGENTS.local.md"]
 LOCAL_FILES = {
@@ -201,7 +208,11 @@ def render_agent(src: Path, tool: str, wf) -> str:
         if meta.get("effort"):
             out.append(f"effort: {meta['effort']}")
         out.append(f"tools: {', '.join(names)}")
-        for k, v in (meta.get("claude") or {}).items():
+        overrides = meta.get("claude") or {}
+        mode = str(_cfg(wf, "models.claude_permission_mode", "") or "")
+        if mode and "permissionMode" not in overrides:
+            out.append(f"permissionMode: {mode}")
+        for k, v in overrides.items():
             out.append(f"{k}: {v if not isinstance(v, str) else v}")
     elif tool == "opencode":
         def perm(on: bool) -> str:
@@ -239,6 +250,14 @@ class Installer:
         self.t, self.tool, self.force, self.dry = target, tool, force, dry
         self.log: list[str] = []
         self.skipped: list[str] = []
+        self.kit_files: set[str] = set()   # every file the kit ships into the target
+
+    def record_tree(self, src: Path, dst: Path) -> None:
+        for f in src.rglob("*"):
+            rel = f.relative_to(src)
+            if (f.is_file() and "__pycache__" not in rel.parts
+                    and not any(rel.match(pat) for pat in IGNORE_NAMES)):
+                self.kit_files.add(self.rel(dst / rel).replace("\\", "/"))
 
     def note(self, msg: str) -> None:
         self.log.append(msg)
@@ -251,6 +270,7 @@ class Installer:
         if not src.is_dir():
             return
         self.note(f"sync  {self.rel(dst)}/")
+        self.record_tree(src, dst)
         if not self.dry:
             dst.mkdir(parents=True, exist_ok=True)
             shutil.copytree(src, dst, dirs_exist_ok=True, ignore=IGNORE)
@@ -264,6 +284,28 @@ class Installer:
         if not self.dry:
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(text, encoding="utf-8")
+
+    def prune(self) -> None:
+        """Delete files an earlier install shipped that the kit no longer ships."""
+        man = self.t / MANIFEST
+        old: set[str] = set()
+        if man.is_file():
+            try:
+                old = set(json.loads(man.read_text(encoding="utf-8")).get("files", []))
+            except (json.JSONDecodeError, AttributeError):
+                old = set()
+        for rel in sorted(old - self.kit_files):
+            f = self.t / rel
+            if not f.is_file() or not f.resolve().is_relative_to(self.t):
+                continue
+            self.note(f"prune {rel} (no longer shipped by the kit)")
+            if not self.dry:
+                f.unlink()
+                d = f.parent
+                while d != self.t and d.is_dir() and not any(d.iterdir()):
+                    d.rmdir()
+                    d = d.parent
+        self.write(man, json.dumps({"files": sorted(self.kit_files)}, indent=1) + "\n", owned=True)
 
     def json_merge(self, dst: Path, patch: dict[str, Any], merge) -> None:
         cur: dict[str, Any] = {}
@@ -290,10 +332,27 @@ def _merge_missing(cur: dict, patch: dict) -> dict:
     return out
 
 
-def _merge_claude_hooks(cur: dict, patch: dict) -> dict:
-    """Append each hook entry whose command is not already wired for that event+matcher."""
-    out = dict(cur)
+def _is_kit_mcp_hook(h: dict) -> bool:
+    cmd = str(h.get("command", ""))
+    return "/.workflow/hooks/guards/" in cmd and cmd.rstrip('"').endswith(MCP_GUARDS)
+
+
+def _merge_claude_settings(cur: dict, patch: dict) -> dict:
+    """Hooks: append each entry whose command is not already wired for that event+matcher;
+    refresh the fields of kit-owned entries already wired; replace the kit's MCP guard
+    entries with the freshly rendered ones. permissions.deny: append missing rules, never
+    remove the project's."""
+    out = json.loads(json.dumps(cur))
     hooks = dict(out.get("hooks", {}))
+    if "PreToolUse" in hooks:
+        kept = []
+        for grp in hooks["PreToolUse"]:
+            rest = [h for h in grp.get("hooks", []) if not _is_kit_mcp_hook(h)]
+            if rest:
+                kept.append(dict(grp, hooks=rest))
+            elif not grp.get("hooks"):
+                kept.append(grp)
+        hooks["PreToolUse"] = kept
     for event, groups in patch.get("hooks", {}).items():
         existing = list(hooks.get(event, []))
         for grp in groups:
@@ -301,11 +360,44 @@ def _merge_claude_hooks(cur: dict, patch: dict) -> dict:
             if match is None:
                 existing.append(grp)
                 continue
-            have = {h.get("command") for h in match.get("hooks", [])}
-            match["hooks"] = match.get("hooks", []) + [
-                h for h in grp.get("hooks", []) if h.get("command") not in have]
+            by_cmd = {h.get("command"): h for h in match.get("hooks", [])}
+            for h in grp.get("hooks", []):
+                have = by_cmd.get(h.get("command"))
+                if have is None:
+                    match["hooks"] = match.get("hooks", []) + [h]
+                elif "/.workflow/hooks/" in str(h.get("command", "")):
+                    have.update(h)
         hooks[event] = existing
     out["hooks"] = hooks
+    deny = (patch.get("permissions") or {}).get("deny") or []
+    if deny:
+        perms = dict(out.get("permissions") or {})
+        cur_deny = list(perms.get("deny") or [])
+        perms["deny"] = cur_deny + [d for d in deny if d not in cur_deny]
+        out["permissions"] = perms
+    return out
+
+
+def _render_claude_fragment(frag: dict, wf) -> dict:
+    """Add one PreToolUse group per configured MCP server: the code-graph server gets
+    graph_query.py, each `guards.mcp_readonly_servers` server gets mcp_readonly.py. No
+    configured server → no MCP hook (a catch-all matcher would spawn two processes on
+    every MCP call)."""
+    out = json.loads(json.dumps(frag))
+    cmd = 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/{}"'
+    servers: dict[str, list[str]] = {}
+    if _cfg(wf, "graph.tool", "none") != "none":
+        srv = str(_cfg(wf, "graph.mcp_server", "") or "")
+        if srv:
+            servers.setdefault(srv, []).append("graph_query.py")
+    for entry in _cfg(wf, "guards.mcp_readonly_servers", []) or []:
+        srv = str((entry or {}).get("server", "")) if isinstance(entry, dict) else ""
+        if srv:
+            servers.setdefault(srv, []).append("mcp_readonly.py")
+    groups = out.setdefault("hooks", {}).setdefault("PreToolUse", [])
+    for srv, scripts in servers.items():
+        groups.append({"matcher": f"mcp__{srv}__.*",
+                       "hooks": [{"type": "command", "command": cmd.format(s)} for s in scripts]})
     return out
 
 
@@ -327,8 +419,10 @@ def install(target: Path, tool: str, force: bool, dry: bool) -> int:
     ins.copytree(KIT / "rules", wfd / "rules")
     if not dry:
         shutil.copy2(KIT / "install.py", wfd / "scripts" / "install.py")
+    ins.kit_files.add(".workflow/scripts/install.py")
     ins.write(wfd / "AGENTS.md", (KIT / "AGENTS.md").read_text(encoding="utf-8"), owned=True)
-    ins.write(wfd / ".gitignore", "state/\n", owned=True)
+    ins.kit_files.add(".workflow/AGENTS.md")
+    ins.write(wfd / ".gitignore", "state/\n__pycache__/\n", owned=True)
     # project-owned: created once, never overwritten (curate promotes into these)
     for rel, text in LOCAL_FILES.items():
         if not (wfd / rel).exists():
@@ -366,6 +460,7 @@ def install(target: Path, tool: str, force: bool, dry: bool) -> int:
         for sk in sorted(p for p in base.glob("*") if p.is_dir()):
             dst = skill_root / sk.name
             if dst.exists() and not force:
+                ins.record_tree(sk, dst)
                 ins.skipped.append(ins.rel(dst))
                 ins.note(f"SKIP  {ins.rel(dst)}/ (exists; --force to overwrite)")
                 continue
@@ -376,19 +471,26 @@ def install(target: Path, tool: str, force: bool, dry: bool) -> int:
         for tl, d in (("claude", ".claude/agents"), ("opencode", ".opencode/agents")):
             if (tl == "claude" and use_claude) or (tl == "opencode" and use_oc):
                 ins.write(t / d / ag.name, render_agent(ag, tl, wf), owned=False)
+                ins.kit_files.add(f"{d}/{ag.name}")
 
     # 5. hooks
     if use_claude:
         frag = KIT / "adapters" / "claude" / "settings.hooks.json"
         if frag.is_file():
             ins.json_merge(t / ".claude" / "settings.json",
-                           json.loads(frag.read_text(encoding="utf-8")), _merge_claude_hooks)
+                           _render_claude_fragment(json.loads(frag.read_text(encoding="utf-8")), wf),
+                           _merge_claude_settings)
     if use_oc:
         ins.copytree(KIT / "adapters" / "opencode" / "plugins", t / ".opencode" / "plugins")
         pkg = KIT / "adapters" / "opencode" / "package.json"
         if pkg.is_file():
-            ins.json_merge(t / ".opencode" / "package.json",
-                           json.loads(pkg.read_text(encoding="utf-8")), _merge_missing)
+            # Only the plugin SDK is installed; typescript, @types/node and the typecheck
+            # script exist for type-checking the kit's own plugin source.
+            dev = json.loads(pkg.read_text(encoding="utf-8")).get("devDependencies", {})
+            sdk = {"devDependencies": {k: v for k, v in dev.items() if k == "@opencode-ai/plugin"}}
+            ins.json_merge(t / ".opencode" / "package.json", sdk, _merge_missing)
+
+    ins.prune()
 
     print("\nDone." if not dry else "\nDry run — nothing written.")
     if ins.skipped:

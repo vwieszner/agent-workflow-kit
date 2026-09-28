@@ -29,8 +29,9 @@ Usage:
 Exit codes (fails CLOSED):
     0  all green
     1  test failures/errors
-    2  infra/config error (scoped_cmd unset, story not in registry, runner produced no
-       result line, timeout, shell could not launch)
+    2  infra/config error (scoped_cmd unset or missing a `config: tests_policy.required_flags`
+       entry, story not in registry, runner produced no result line, timeout, shell could
+       not launch)
 """
 from __future__ import annotations
 
@@ -112,6 +113,12 @@ def parse_output(text: str, returncode: int,
     return {"status": status, "summary": summary, "failures": failures, "ids": ids}
 
 
+def missing_required_flags(cmd: str) -> list[str]:
+    """`config: tests_policy.required_flags` entries absent from a rendered test command."""
+    return [str(f) for f in (wfconfig.get("tests_policy.required_flags", []) or [])
+            if str(f) not in cmd]
+
+
 def quote_labels(labels: list[str]) -> str:
     """Shell-quote labels for the platform shell (POSIX sh vs Windows cmd)."""
     if os.name == "nt":
@@ -173,6 +180,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     labels = quote_labels(a.labels)
     cmd = wfconfig.render(template, labels=labels, **ctx)
+    missing = missing_required_flags(cmd)
+    if missing:
+        print(f"[SCOPED] CONFIG-ERROR — tests.scoped_cmd lacks required flag(s) "
+              f"{', '.join(missing)} (config: tests_policy.required_flags)")
+        return 2
 
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8",

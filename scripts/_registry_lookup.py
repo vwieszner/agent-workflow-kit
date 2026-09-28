@@ -21,17 +21,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wfconfig  # noqa: E402
-
-EMPTY_CELLS = ("", "—", "-", "--")
-
-
-def _clean(cell: str) -> str:
-    c = cell.strip()
-    return "" if c in EMPTY_CELLS else c
+import slot_registry  # noqa: E402
 
 
 def registry_path() -> Path:
-    return wfconfig.path("paths.slot_registry", "docs/implementation-artifacts/slot-registry.md")
+    return slot_registry.registry_path()
 
 
 def rows() -> list[dict]:
@@ -40,25 +34,7 @@ def rows() -> list[dict]:
         text = registry_path().read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return []
-    out = []
-    for line in text.splitlines():
-        if not line.lstrip().startswith("|"):
-            continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 5:
-            continue
-        slot = cells[0]
-        if not slot.isdigit():  # header or separator row
-            continue
-        out.append({
-            "slot": int(slot),
-            "status": _clean(cells[1]).lower(),
-            "story_id": _clean(cells[2]),
-            "branch": _clean(cells[3]),
-            "worktree": _clean(cells[4]),
-            "since": _clean(cells[5]) if len(cells) > 5 else "",
-        })
-    return out
+    return slot_registry.parse_rows(text.splitlines())
 
 
 def find(story_ids: list[str] | str) -> dict | None:

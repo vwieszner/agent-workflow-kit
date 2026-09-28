@@ -2,7 +2,12 @@
   "name": "workflow-opencode-plugins",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.18.0"
+    "@opencode-ai/plugin": "^1.18.0",
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
   }
 }

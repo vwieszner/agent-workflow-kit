@@ -41,7 +41,7 @@ Playwright `workers`, Go `-p` / `t.Parallel()`.
    shard (same module/file/class group) — and run that combination single-process.
 3. **Order dependence:** run the label set under the runner's shuffle mode with a LOGGED seed and
    re-run with the same seed to preserve order (e.g. Django `--shuffle [seed]`, pytest-randomly
-   `-p randomly -p "randomly_seed=<seed>"`, Jest `--randomize --seed=<seed>`, Go
+   `-p randomly --randomly-seed=<seed>` (`-p no:randomly` disables it), Jest `--randomize --seed=<seed>`, Go
    `-shuffle=<seed>`). Bisect by shrinking the label set under a fixed failing seed.
 4. **Parallel-only:** if it only fails under the parallel runner, it is fork / shared-backing-state
    territory (Phase 2, classes C/D) — reproduce via the full gate or a scripted N× loop, and arm

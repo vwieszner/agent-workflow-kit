@@ -106,7 +106,7 @@ mode: subagent            # subagent | primary | all
 tier: standard            # deep | standard | fast  → config: models.<tool>.<tier>
 effort: high              # Claude Code only (low|medium|high|xhigh|max); ignored by OpenCode
 tools: [read, grep, glob, edit, write, bash, skill, graph]
-readonly: false           # true → no edit/write/bash-mutation; OpenCode edit: deny
+readonly: false           # true → edit/write stripped (OpenCode edit: deny); see note below
 ---
 <body — tool-neutral prose>
 ```
@@ -124,6 +124,10 @@ Capability vocabulary for `tools` and its rendering:
 | graph | `mcp__<config: graph.mcp_server>` + ToolSearch | `tools: {"<server>*": true}` (legacy tools map; the only MCP gate) |
 | docs | `mcp__<config: docs.mcp_server>` + ToolSearch | `tools: {"<server>*": true}` |
 | monitor | Monitor, TaskStop, SendMessage | (no equivalent — omitted) |
+
+`readonly: true` removes the edit/write capabilities at render time. It does not restrict `bash`:
+an agent that is readonly and keeps `bash` (e.g. `dev-preflight`, `story-diagnose`) is held to
+no-mutation by its own prose — its hard rules forbid lifecycle and git-state commands.
 
 Optional per-tool overrides in the source frontmatter: `claude: {permissionMode: auto}` and
 `opencode: {temperature: 0.1}` are passed through verbatim.

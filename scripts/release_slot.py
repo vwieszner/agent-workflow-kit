@@ -17,8 +17,9 @@ Usage:
   uv run --no-project .workflow/scripts/release_slot.py --story-id 7.5.8
 
 Output (single JSON line on stdout):
-  {"status":"released","slot":1,"branch_name":"7-5-8","story_id":"7.5.8"}
-  {"status":"not_found","story_id":"7.5.8","branch_name":"7-5-8"}  # already free
+  {"status":"released","slot":1,"branch_name":"7-5-8","branch":"story/7-5-8","story_id":"7.5.8"}
+  {"status":"not_found","story_id":"7.5.8","branch_name":"7-5-8","branch":"story/7-5-8"}  # already free
+  (`branch_name` is the dashed id, as reserve_slot.py emits it; `branch` is the git branch.)
   {"status":"error","message":"..."}
 
 Exit codes: 0 for released / not_found, 1 for error.
@@ -33,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _named_mutex import NamedMutex  # noqa: E402
 import slot_registry as reg  # noqa: E402
+import wfconfig  # noqa: E402
 
 
 def main() -> int:
@@ -61,14 +63,15 @@ def main() -> int:
                     lines[row["index"]] = reg.free_row(released)
                     break
 
+            branch = wfconfig.branch_name(sid)
             if released is None:
-                print(json.dumps({"status": "not_found",
-                                  "story_id": args.story_id, "branch_name": sid}))
+                print(json.dumps({"status": "not_found", "story_id": args.story_id,
+                                  "branch_name": sid, "branch": branch}))
                 return 0
 
             reg.write_lines(registry, lines)
-            print(json.dumps({"status": "released", "slot": released,
-                              "branch_name": sid, "story_id": args.story_id}))
+            print(json.dumps({"status": "released", "slot": released, "branch_name": sid,
+                              "branch": branch, "story_id": args.story_id}))
             return 0
     except (TimeoutError, OSError) as e:
         print(json.dumps({"status": "error", "message": str(e)}))

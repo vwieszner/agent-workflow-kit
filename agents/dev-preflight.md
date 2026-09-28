@@ -37,7 +37,7 @@ Shell: `<compose>` below is `config: stack.compose_cmd`.
 
 ### Step 0 — Tooling integrity (host-side, cheap)
 
-If `.workflow/scripts/check_settings_and_docs_integrity.py` is installed, run it:
+Run:
 
 ```bash
 uv run --no-project .workflow/scripts/check_settings_and_docs_integrity.py
@@ -77,9 +77,15 @@ With `sample_file`:
 
 If missing, poll up to 30s with a heartbeat. Still missing → report the candidate causes: (1) the stack was brought up from a worktree that lacks the file (wrong worktree); (2) the watch is not running or stopped syncing; (3) the `sample_file` path is wrong. For per-file drift across services, run `uv run --no-project .workflow/scripts/check_container_sync.py -p <project_name> <paths>` (without `--fix` — this agent is report-only).
 
+Without `sample_file`: take the `config: stack.health.sync_sample_count` most recently modified files under `<worktree>/<config: stack.health.worktree_src>` (skipping `config: stack.health.sync_ignores`) and run `check_container_sync.py -p <project_name>` over them. Report every mismatch; a mismatch on a file younger than `config: stack.health.sync_grace_s` seconds is a warning, not a failure.
+
 ### Step 3b — Schema drift
 
-If a health check covering schema state failed (e.g. a migration check), determine which kind of drift it is:
+Run this step when either holds: a health check covering schema state failed (e.g. a migration check), or `config: pipeline.schema_globs` is non-empty and the schema files changed since the stack's start sha — `git -C <worktree> diff --name-only <start-sha>..HEAD -- <globs>` is non-empty, where `<start-sha>` is the commit the stack was brought up on: `git -C <worktree> rev-list -1 --before=<started_at> HEAD`, with `started_at` from `.workflow/state/story-setup/<stack>.json`. An edit to an already-applied schema definition is exactly the drift a plan-style check reports as clean, so it is checked even when every health check passed. If the start sha cannot be determined, list the touched schema files and ask the owner whether the live store predates them — do not assume.
+
+When `config: smoke.migration_plan_cmd` is set, also run it in the app service (read-only) and compare its output with `config: smoke.migration_plan_clean_regex`: no match → pending schema operations against the live store.
+
+Determine which kind of drift it is:
 
 - **Model-vs-schema-definition drift** — the code's model changed without the schema definition being updated. Use the project's read-only check command if one is configured in `config: stack.health.checks`.
 - **Schema-definition-vs-live-store drift** — the schema files (`config: pipeline.schema_globs`) changed after the slot's live store was initialised. Compare `git log` / `git diff` of those globs since the stack's bring-up (the `started_at` in `.workflow/state/story-setup/<stack>.json`) against the live store's actual structure (read-only introspection).
@@ -125,5 +131,5 @@ When the evidence does not establish a single cause, say so and list the remaini
 
 ## Windows
 
-- In Git Bash, container paths passed as arguments to `docker`/`docker compose exec` are rewritten to Windows paths; prefix them with `//` (`//app/x`) instead of `/`.
+- In Git Bash, container paths passed as arguments to `docker`/`docker compose exec` are rewritten to Windows paths; prefix them with `//` (`//<container_src>/x`) instead of `/`.
 - Watcher processes do not die with their parent shell on Windows; `.workflow/scripts/cleanup_story_stack.py` handles orphan watchers at teardown.

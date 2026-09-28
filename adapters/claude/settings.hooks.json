@@ -1,4 +1,22 @@
 {
+  "permissions": {
+    "deny": [
+      "Bash(git push *--force*)",
+      "Bash(git push *-f *)",
+      "Bash(git push *-f)",
+      "Bash(git reset --hard*)",
+      "Bash(*git filter-branch*)",
+      "Bash(*git update-ref *-d*)",
+      "PowerShell(git push *--force*)",
+      "PowerShell(git push *-f *)",
+      "PowerShell(git push *-f)",
+      "PowerShell(git reset --hard*)",
+      "PowerShell(*git filter-branch*)",
+      "PowerShell(*git update-ref *-d*)",
+      "PowerShell(*Format-Volume*)",
+      "PowerShell(*Clear-Disk*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -48,19 +66,6 @@
             "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/agent_source_read.py\""
           }
         ]
-      },
-      {
-        "matcher": "mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/graph_query.py\""
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/mcp_readonly.py\""
-          }
-        ]
       }
     ],
     "PostToolUse": [
@@ -90,11 +95,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/write_handoff.py\" --tool claude"
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/write_handoff.py\" --tool claude",
+            "timeout": 200
           },
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_retrospective.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_retrospective.py\" --tool claude"
           }
         ]
       },
@@ -103,7 +109,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_retrospective.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_retrospective.py\" --tool claude"
           }
         ]
       }

@@ -14,12 +14,14 @@ Checks (all read-only; never mutates the stack, the worktree, or any container):
   3. watch     — a compose-watch process anchored in the worktree (process CWD
                  readout; psutil when importable, POSIX `ps` + /proc|lsof fallback).
                  Skipped when `config: stack.watch = false`.
-  4. code sync — sha256 of the N most-recently-modified files under
-                 <worktree>/`config: stack.health.worktree_src` compared against
-                 the copies under `config: stack.health.container_src` in the app
-                 service. Read-only on purpose: a WRITE probe would trigger a
-                 sync+restart watch action and bounce the service. Skipped when
-                 container_src is "".
+  4. code sync — sha256 of the N most-recently-modified files under the sync
+                 mounts' host prefixes compared against the container copies, each
+                 file routed to the services of the most specific mount that serves it
+                 (`config: stack.health.sync_mounts`; empty → one mount
+                 `stack.health.worktree_src` → `stack.health.container_src` in the app
+                 service — check_container_sync.load_mounts). Read-only on purpose: a
+                 WRITE probe would trigger a sync+restart watch action and bounce the
+                 service. Skipped when no mount is configured.
   5. branch    — worktree is on the expected git branch
 
 `config: stack.runtime = "none"` → checks 1–4 print SKIPPED; only the branch
@@ -162,38 +164,51 @@ def _sync_candidates(src: Path, ignores: list[str], count: int) -> list[Path]:
 
 
 def check_code_sync(project: str, worktree: Path) -> bool:
-    container_src = str(wfconfig.get("stack.health.container_src", "") or "").rstrip("/")
-    if not container_src:
-        skip("sync", 'config: stack.health.container_src = ""')
+    import check_container_sync as ccs
+    mounts = ccs.load_mounts()  # most-specific host prefix first
+    if not mounts:
+        skip("sync", 'no sync mount configured (config: stack.health.sync_mounts is empty and '
+                     'stack.health.container_src = "")')
         return True
-    src = (worktree / str(wfconfig.get("stack.health.worktree_src", ".") or ".")).resolve()
-    if not src.is_dir():
-        record("FAIL", "sync", f"source dir missing: {src}")
-        return False
+    root = worktree.resolve()
     ignores = [str(x) for x in (wfconfig.get("stack.health.sync_ignores",
                                              [".git", "__pycache__", ".pytest_cache", ".pyc",
                                               "node_modules"]) or [])]
     count = int(wfconfig.get("stack.health.sync_sample_count", 3))
     grace = int(wfconfig.get("stack.health.sync_grace_s", 30))
-    service = _stack.app_service()
     ok = True
-    for path in _sync_candidates(src, ignores, count):
-        rel = path.relative_to(src).as_posix()
-        local_sha = hashlib.sha256(path.read_bytes()).hexdigest()
-        proc = _stack.run(_stack.compose_argv(project, "exec", "-T", service, "sh", "-c",
-                                              f"sha256sum '{container_src}/{rel}' 2>/dev/null || echo MISSING"),
-                          timeout=45, env=_stack.env_for_stack(project))
-        container_sha = proc.stdout.strip().split()[0] if proc.stdout.strip() else "ERROR"
-        if container_sha == local_sha:
-            record("PASS", "sync", f"{rel} (sha match)")
-            continue
-        age = time.time() - path.stat().st_mtime
-        if age < grace:
-            record("WARN", "sync", f"{rel} differs but was modified {age:.0f}s ago — sync may be in flight")
-        else:
-            record("FAIL", "sync", f"{rel} STALE in container (local mtime {age:.0f}s ago; "
-                                   f"container={container_sha[:12]})")
+    candidates: set[Path] = set()
+    for prefix, _services, _croot in mounts:
+        src = (root / prefix).resolve() if prefix else root
+        if not src.is_dir():
+            record("FAIL", "sync", f"source dir missing: {src}")
             ok = False
+            continue
+        candidates.update(_sync_candidates(src, ignores, count))
+    sample = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[:count]
+    for path in sample:
+        rel = path.relative_to(root).as_posix()
+        # Route to the mount that SERVES the file: a nested mount's files also exist in the
+        # outer mount's containers, where a match proves nothing.
+        prefix, services, croot = next(m for m in mounts if rel.startswith(m[0]))
+        crel = rel[len(prefix):]
+        local_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        for service in services:
+            proc = _stack.run(_stack.compose_argv(project, "exec", "-T", service, "sh", "-c",
+                                                  f"sha256sum '{croot}/{crel}' 2>/dev/null || echo MISSING"),
+                              timeout=45, env=_stack.env_for_stack(project))
+            container_sha = proc.stdout.strip().split()[0] if proc.stdout.strip() else "ERROR"
+            if container_sha == local_sha:
+                record("PASS", "sync", f"{rel} [{service}] (sha match)")
+                continue
+            age = time.time() - path.stat().st_mtime
+            if age < grace:
+                record("WARN", "sync", f"{rel} [{service}] differs but was modified {age:.0f}s ago "
+                                       "— sync may be in flight")
+            else:
+                record("FAIL", "sync", f"{rel} [{service}] STALE in container (local mtime "
+                                       f"{age:.0f}s ago; container={container_sha[:12]})")
+                ok = False
     return ok
 
 
@@ -223,7 +238,7 @@ def main() -> int:
     shared = str(wfconfig.get("slots.shared_stack_name", ""))
     prefix = str(wfconfig.get("slots.stack_prefix", "story-"))
     expected_branch = args.expected_branch or (
-        str(wfconfig.get("git.base_branch", "main")) if args.project_name == shared
+        str(wfconfig.get("git.base_branch", "development")) if args.project_name == shared
         else wfconfig.branch_name(args.project_name.removeprefix(prefix))
     )
     slot = args.slot if args.slot is not None else _stack.slot_for_stack(args.project_name)

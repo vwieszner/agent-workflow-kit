@@ -51,7 +51,8 @@ import wfconfig  # noqa: E402
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
-DEFAULT_STATUSES = ("backlog", "ready-for-dev", "in-progress", "review", "done")
+DEFAULT_STATUSES = ("backlog", "ready-for-dev", "in-progress", "review", "done", "blocked",
+                    "deferred", "optional")
 DEFAULT_NOTE_CAP = 240
 DEFAULT_HISTORY_DIRNAME = "story-history"
 LAST_UPDATED_HISTORY_KEY = "_last-updated"

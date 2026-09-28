@@ -66,25 +66,54 @@ import _stack  # noqa: E402
 import slot_registry as reg  # noqa: E402
 
 
+def _registered_worktrees(repo_root: Path) -> dict[Path, str]:
+    """{resolved worktree path: branch ref} from `git worktree list --porcelain`."""
+    out = subprocess.run(["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
+                         capture_output=True, text=True, errors="replace").stdout
+    found: dict[Path, str] = {}
+    path: Path | None = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = Path(line[len("worktree "):]).resolve()
+            found[path] = ""
+        elif line.startswith("branch ") and path is not None:
+            found[path] = line[len("branch "):].strip()
+    return found
+
+
 def resolve_worktree(story_id: str, worktree_root: Path):
     """Return (slot_num | None, branch, worktree_path). Raises LookupError on failure."""
     registry = reg.registry_path()
-    if registry.is_file():
-        for row in reg.parse_rows(reg.read_lines(registry)):
-            if row["status"] == "in_use" and row["story_id"] == story_id:
-                wt = Path(row["worktree"])
-                if not wt.is_absolute():
-                    wt = wfconfig.repo_root() / wt
-                return row["slot"], row["branch"] or wfconfig.branch_name(story_id), wt
-    # Fallback: unique worktree dir named <id> or <id>-* (registry row already free).
-    if worktree_root.is_dir():
-        candidates = [d for d in worktree_root.iterdir() if d.is_dir()
-                      and (d.name == story_id or d.name.startswith(f"{story_id}-"))]
-        if len(candidates) == 1:
-            return None, wfconfig.branch_name(candidates[0].name), candidates[0]
-    raise LookupError(
-        f"Cannot resolve worktree for story id '{story_id}' -- registry has no "
-        f"in_use row and no unique fallback under {worktree_root}")
+    rows = reg.parse_rows(reg.read_lines(registry)) if registry.is_file() else []
+    for row in rows:
+        if row["status"] == "in_use" and row["story_id"] == story_id:
+            wt = Path(row["worktree"])
+            if not wt.is_absolute():
+                wt = wfconfig.repo_root() / wt
+            return row["slot"], row["branch"] or wfconfig.branch_name(story_id), wt
+    # Fallback (registry row already free): ONLY the dir named exactly <id>, and only when
+    # git registers it on this story's branch. A prefix match would reach a sibling story
+    # (`5` → `5-1`) and delete its worktree and branch.
+    branch = wfconfig.branch_name(story_id)
+    cand = worktree_root / story_id
+    if not cand.exists():
+        return None, branch, cand  # already removed; the branch step stays idempotent
+    for row in rows:
+        if row["status"] == "in_use" and row["worktree"]:
+            owned = Path(row["worktree"])
+            if not owned.is_absolute():
+                owned = wfconfig.repo_root() / owned
+            if owned.resolve() == cand.resolve():
+                raise LookupError(
+                    f"{cand} is assigned to story '{row['story_id']}' in the slot registry -- "
+                    f"refusing to tear it down for '{story_id}'")
+    ref = _registered_worktrees(wfconfig.repo_root()).get(cand.resolve())
+    if ref != f"refs/heads/{branch}":
+        raise LookupError(
+            f"Cannot resolve worktree for story id '{story_id}' -- registry has no in_use row "
+            f"and {cand} is not a git worktree on {branch} "
+            f"({'not registered' if ref is None else ref or 'detached HEAD'})")
+    return None, branch, cand
 
 
 def find_orphans(worktree: Path) -> tuple[list[dict], str | None]:
@@ -130,9 +159,13 @@ def release_slot_row(story_id: str) -> str:
         return "FAILED (release_slot.py missing)"
     print(f"\n{Path(sys.executable).name} {script} --story-id {story_id}")
     try:
+        # Pin the main repo: run from inside the worktree being deleted, wfconfig would
+        # otherwise resolve the root from a vanished cwd and the release would crash.
+        repo_root = wfconfig.repo_root()
         r = subprocess.run([sys.executable, str(script), "--story-id", story_id],
                            capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=90)
+                           timeout=90, cwd=repo_root,
+                           env=dict(os.environ, WORKFLOW_REPO_ROOT=str(repo_root)))
     except Exception as e:  # noqa: BLE001 -- any failure must be visible, never swallowed
         print(f"WARNING: release_slot.py could not run -- {e}")
         return f"FAILED ({e})"

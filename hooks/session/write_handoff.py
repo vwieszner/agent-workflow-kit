@@ -20,8 +20,9 @@ prompt as ONE argument), else the per-tool default:
 Switch: `config: session.handoff_on_compact` (default true).
 
 The child runs with WORKFLOW_HEADLESS=1; this script no-ops when that is already set, so a
-headless run never recursively spawns another. The prompt begins with HANDOFF_PROMPT_PREFIX;
-session_journal.py treats a user message with that prefix as an injection, not user input.
+headless run never recursively spawns another, and session_journal.py no-ops under it, so the
+child's own turns are never journaled. Also a no-op when WORKFLOW_RETRO_RUNNING is set (inside
+the retrospective's headless analyst).
 Always exits 0 — compaction is never blocked or failed by this hook.
 """
 from __future__ import annotations
@@ -65,7 +66,7 @@ def build_argv(template: str, prompt: str) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    if os.environ.get("WORKFLOW_HEADLESS"):
+    if os.environ.get("WORKFLOW_HEADLESS") or os.environ.get("WORKFLOW_RETRO_RUNNING"):
         return 0
     import wfconfig
 

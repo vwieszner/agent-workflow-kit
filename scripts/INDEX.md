@@ -23,9 +23,10 @@ exit codes.
 | `bring_up_story_stack.py` | Compose wrapper for a slot with ALL port vars (`--mode up\|watch\|down\|ps`). | compose exit code |
 | `bring_up_stack_async.py` | Background bring-up; writes `.workflow/state/story-setup/<stack>.json`. | — (background) |
 | `wait_for_stack_ready.py` | Poll the bring-up status file; confirms services are running now. | 0 up, 1 failed, 2 timeout, 3 stale up |
-| `stack_preflight.py` | THE pre-test gate: services, health checks, watch, code sync, branch. | 0 pass, 1 fail |
+| `stack_preflight.py` | THE pre-test gate: services, health checks, watch, code sync (routed per sync mount), branch. | 0 pass, 1 fail |
+| `check_settings_and_docs_integrity.py` | dev-preflight Step 0: every hook script the Claude settings / OpenCode plugin reference exists and is git-tracked; every `config: integrity.quoted_passages` entry still exists. Zero checks is a FAIL. | 0 ok, 1 fail |
 | `check_container_sync.py` | Prove compose watch synced files into containers; repair if not. | 0 in sync, 1 drift, 2 usage |
-| `post_merge_smoke.py` | Post-merge smoke on the shared stack, with diagnoses. | 0 green, 1 fail |
+| `post_merge_smoke.py` | Post-merge smoke on the shared stack: service state, log scan, source-sync gate; diagnoses E, A, configured, A2, D. | 0 green, 1 fail |
 | `start_slot0.py` | Bring the shared dev stack up and wait until usable. | 0 running, 1 compose error, 2 timeout/partial |
 | `cleanup_story_stack.py` | Slot teardown: orphan watcher kill, down -v, worktree + branch removal, slot release. | 0 done, 1 unresolvable/refused/error |
 | `_stack.py`, `_registry_lookup.py`, `_named_mutex.py` | Internal helpers (compose, registry lookup, cross-platform lock). | — |
@@ -38,8 +39,8 @@ exit codes.
 | `story_record.py` | Append/check durable phase facts in a story's record file (read by the phase guard). |
 | `story_ledger.py` | Project a story's position from journal + git + disk (resume after `/clear`). |
 | `log_failure.py` | Atomic append to the autonomous loop's permanent-failure log. |
-| `run_scoped_tests.py` | Run `config: tests.scoped_cmd` and print a parsed summary. |
-| `run_full_suite.py` | The full gate: preflight, pre-phases, concurrent legs, post-phases; host-global lock. |
+| `run_scoped_tests.py` | Run `config: tests.scoped_cmd` and print a parsed summary; enforces `config: tests_policy.required_flags`. |
+| `run_full_suite.py` | The full gate: preflight, schema-drift + pre-phases, concurrent legs, post-phases; host-global lock; enforces `config: tests_policy.required_flags`. |
 
 ## Learning loop and debugging
 

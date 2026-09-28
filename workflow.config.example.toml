@@ -21,7 +21,7 @@ branch_prefix = "story/"          # story branch = branch_prefix + story_id
 worktrees_root = "../{project}-worktrees"   # relative to repo root; {project} = project.name
 merge_style = "--no-ff"
 max_commits_per_story = 2         # impl commit + optional close-out commit
-impl_commit_template = "feat: [Story {story_id}] <summary>"
+impl_commit_template = "<type>: [Story {story_id}] <summary>"   # <type>: feat | fix | docs | refactor | test
 closeout_commit_template = "chore: [Story {story_id}] code review close-out — <summary>"
 # Gitignored files story_setup.py copies from the repo root into a new worktree (never
 # overwriting the worktree's own copy). Compose reads `.env` from the worktree, so without it
@@ -117,6 +117,8 @@ sync_mounts = []
 # Host-passive mode: app-side commands (the app's runtime, package managers, test runners)
 # run only inside the app container via `{compose} -p {stack} exec -T <service> ...`.
 # false → the host-passive rule is off (app runs on the host).
+# true also makes the shell guards deny bare host `python`/`python3` (allowed: `uv run ...`,
+# env.project_python, `.workflow/` kit scripts, container exec segments).
 app_runs_in_container = true
 # Sanctioned runner for standalone tooling scripts and hooks on the host (stdlib / PEP 723 only).
 host_tooling_runner = "uv run --no-project"
@@ -140,6 +142,9 @@ lint_cmd = ""
 # A failing pre-phase aborts the gate with its own exit code; a failing post-phase fails it (exit 1).
 full_pre_phases = []    # e.g. [{ name = "lint", cmd = "{compose} -p {stack} exec -T app make lint" }]
 full_post_phases = []   # e.g. [{ name = "coverage-check", cmd = "python3 tools/check_coverage.py" }]
+# Schema-vs-migration drift check, run by run_full_suite.py as the first pre-phase ONLY when a
+# file matching pipeline.schema_globs changed against git.base_branch; "" → SKIPPED (announced).
+schema_drift_cmd = ""   # e.g. "{compose} -p {stack} exec -T backend python manage.py makemigrations --check --dry-run"
 # Regexes run_full_suite.py / run_scoped_tests.py use to parse results.
 fail_id_regex = "^(?:FAIL|ERROR): (\\S+)"
 summary_regex = "^(?:Ran \\d+ tests?|=+ .* in [\\d.]+s)"
@@ -147,7 +152,9 @@ full_lock_timeout_min = 60        # the gate lock is host-global; a queued run f
 
 [tests_policy]
 # Substrings every scoped/backend test invocation MUST carry (non-interactive flags, test profile).
-required_flags = []               # e.g. ["--noinput", "--settings=myapp.settings.test"]
+# Enforced: run_scoped_tests.py (tests.scoped_cmd) and run_full_suite.py (tests.full_cmd) exit 2
+# with CONFIG-ERROR when the rendered command lacks one.
+required_flags = []             # e.g. ["--noinput", "--settings=myapp.settings.test"]
 # E2E locator attribute — the ONLY permitted locator strategy. "" disables the locator policy.
 e2e_locator_attr = "data-testid"
 e2e_page_objects_dir = ""         # e.g. "frontend/tests/pages"; "" disables
@@ -175,6 +182,14 @@ post_reset_cmds = []              # run after a full slot reset, e.g. re-seeding
 # Extra globs (beyond env.dependency_files, schema_globs, stack.compose_file, Dockerfile*) whose
 # change under a rebase means the slot stack must be rebuilt, e.g. seeded feature-flag defaults.
 stack_affecting_globs = []
+# Run in the slot stack after a rebase brings in a change to env.dependency_files — refreshes
+# dependency volumes a plain `up --build` leaves stale. Templates ({compose} {stack} ...).
+dependency_refresh_cmds = []      # e.g. ["{compose} -p {stack} exec -T frontend npm install"]
+# Run in the slot stack after a rebase brings in a stack_affecting_globs change (re-seed defaults).
+reseed_cmds = []                  # e.g. ["{compose} -p {stack} exec -T backend python manage.py seed_flags"]
+# Story size: at most this many behaviour ACs per story (tokens/a11y, tests, flag flips and
+# ownership notes do not count). 0 = no cap.
+max_behaviour_acs = 5
 full_suite_hang_cap_min = 15      # test-bat-runner: RUNNING wall-time cap before declaring a hang
 
 [smoke]
@@ -198,6 +213,15 @@ diagnoses = [
 migration_paths_regex = ""        # e.g. "migrations/"
 migration_plan_cmd = ""           # the migration tool's dry-run/plan command
 migration_plan_clean_regex = ""   # regex matching the plan output when nothing is pending
+# Diagnosis A — a startup migration / entrypoint failure in the log tails (no auto-fix; the
+# reset path is the owner's call). "" disables it.
+migration_failure_regex = ""      # e.g. "manage\\.py migrate|OperationalError|ProgrammingError"
+
+[integrity]
+# check_settings_and_docs_integrity.py (dev-preflight Step 0): passages a hook or script quotes
+# that must still exist verbatim in `file`. `quoted_by` (optional) must still exist too.
+# [] → the passage check is SKIPPED (announced); the hook-wiring check always runs.
+quoted_passages = []              # e.g. [{ file = ".workflow/AGENTS.local.md", text = "Test-fix iteration", quoted_by = ".workflow/hooks/guards/dispatch_prompt.py" }]
 
 [review]
 round2_min_patches = 5            # round-2 review fires at >= this many approved patches
@@ -206,6 +230,11 @@ required_preamble = "Report findings only — do NOT auto-apply patches — do N
 
 [models]
 # tier → model id, per tool. Agents declare a tier; install.py renders the concrete model.
+# Claude Code permissionMode rendered into every agent ("auto" lets unattended subagents run
+# tools without prompting; "" → omit, the agent prompts per the session's mode). A per-agent
+# `claude: {permissionMode: ...}` override in the agent source wins. Re-render with
+# `install.py install --force` after a change.
+claude_permission_mode = "auto"
 [models.claude]
 deep = "opus"
 standard = "sonnet"
@@ -250,7 +279,7 @@ script_registration = true
 agent_source_read = true
 # Commands that must never run on the host (they belong in a container), regex list.
 # Empty → the host-passive rule is prose only, not enforced.
-host_forbidden = []               # e.g. ["^npm\\b", "^node\\b", "^pip\\b", "^python3?\\b"]
+host_forbidden = []               # e.g. ["^npm\\b", "^node\\b"] (bare python: see env.app_runs_in_container)
 host_forbidden_hint = ""          # remedy text appended to a host_forbidden denial
 block_host_installs = true        # pip install / uv pip install / uv sync / uv add without --no-sync
 # Branches no agent may push to. Empty → [git.main_branch, git.base_branch, "master"].
@@ -258,12 +287,18 @@ protected_branches = []
 # Project command rules for Bash and PowerShell (regex, case-insensitive, whole command). Example:
 # command_deny = [ { pattern = "manage\\.py\\s+makemigrations(?![^|;&\\n]*--(check|dry-run))", reason = "edit the initial migration instead" } ]
 command_deny = []
-# PowerShell recursive-delete allowlist ({repo}/{project} allowed). Empty → repo root, worktrees root, temp.
+# Recursive-delete allowlist for both shell guards (templates; {repo}/{project} allowed). A target
+# must be STRICTLY inside a root. Empty → repo root, worktrees root, and `claude*`/`workflow*` dirs
+# of the system temp dir. `/`, drive roots and `~`/$HOME are never allowed unless listed.
+# Built in regardless: git reset --hard, git filter-branch, git update-ref -d, Format-Volume, Clear-Disk.
 recursive_delete_allowed = []
 # Subagents exempt from / subject to the "report findings only" preamble check.
-non_review_agents = ["story-spec", "story-impl", "story-finalize", "story-rebase", "story-diagnose", "test-bat-runner", "dev-preflight", "trace-port-traffic", "general-purpose", "Explore", "Plan"]
+# `general-purpose` is deliberately absent: a generic dispatch falls through to prose review detection.
+non_review_agents = ["story-spec", "story-impl", "story-finalize", "story-rebase", "story-diagnose", "test-bat-runner", "dev-preflight", "trace-port-traffic", "Explore", "Plan"]
 review_agents = ["blind-hunter", "edge-case-hunter", "acceptance-auditor", "findings-verifier", "findings-evaluator"]
 # graph_query: agents that only run inside a story worktree (may not query graph.main_project).
+# The check is SKIPPED (stated once per session) until graph.main_project is set to the main
+# checkout's graph project name (the name list_projects / index_repository reports for the repo).
 slot_only_agents = ["story-impl", "story-finalize", "story-rebase", "story-diagnose"]
 graph_exempt_tools = ["index_repository", "list_projects", "delete_project", "index_status"]
 # agent_source_read: agents denied shell reads of source files (skipped when graph.tool = "none").
@@ -274,6 +309,8 @@ script_dirs = ["scripts"]
 script_suffixes = [".py", ".ps1", ".sh"]
 # mcp_readonly: database MCP servers kept read-only. dialect: "cypher" | "sql" | "none".
 # mcp_readonly_servers = [ { server = "graphdb", dialect = "cypher" }, { server = "postgres", dialect = "sql", extra_deny = [] } ]
+# Claude Code: install.py renders one hook matcher per server here and for graph.mcp_server —
+# re-run `install.py install` after changing this list or graph.tool / graph.mcp_server.
 mcp_readonly_servers = []
 
 [session]

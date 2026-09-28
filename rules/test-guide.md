@@ -19,8 +19,9 @@ When `config: env.app_runs_in_container` is true, every test command runs in the
 - **Concurrent full-gate invocations queue** on a host-global lock (announced periodically). Exhausting
   the lock timeout (`config: tests.full_lock_timeout_min`) FAILS the run; it never proceeds unlocked.
 - Scoped runs are NOT covered by the gate's preflight: run
-  `uv run --no-project .workflow/scripts/stack_preflight.py --project-name <stack> --worktree <src-root>`
-  yourself first.
+  `uv run --no-project .workflow/scripts/stack_preflight.py --project-name <stack> --worktree <worktree-root>`
+  yourself first — the worktree root, never its `config: stack.health.worktree_src` subfolder (the
+  script appends it).
 - If the owner asks to "run tests", "check the app", or "verify the build", the job is done only when
   the full gate passes.
 
@@ -29,13 +30,15 @@ When `config: env.app_runs_in_container` is true, every test command runs in the
   non-interactive flag so setup prompts cannot hang the runner, and the test settings/profile so the
   run cannot reach live brokers, queues or databases). Wrappers may not add them for you — check.
 - E2E runners run in CI/non-interactive mode so the HTML reporter does not start a server and hang
-  the process. Never try to open an HTML report from the CLI — tell the owner its path.
+  the process, with runner retries disabled (e.g. `--retries=0`) — a retry turns a failure into a pass. Never try to open an HTML report from the CLI — tell the owner its path.
 - A wrong test label may not error clearly (some runners report a synthetic 1-test failure). Before
   treating a 1-test failure as real, confirm the label resolves to what you intended (labels are
   relative to the in-container source root, not the repo root).
 
 ## 3. Execution discipline
 - **Sequential:** never start a suite while another is running against the same stack.
+- **Parallel stories:** when several agents work on different stories, each runs its own tests as soon
+  as it is ready — none waits for its siblings.
 - **Code freeze (per stack):** do not modify any file in a worktree while that worktree's stack runs a
   suite. Editing another slot's worktree is fine.
 - **Exit code, not summary:** `verify-ground-truth.md`.

@@ -36,6 +36,10 @@ store) are shared by every worker.
 - Raising worker capacity requires bumping every knob in `config: tests_policy.e2e_capacity_knobs`
   together; one without the other silently under-seeds.
 
+## Live-infra tests
+- Live-infra tests run in the full gate's single parallel pass with everything else. Never exclude them
+  by tag or marker — that drops them from the run entirely.
+
 ## Worker counts
 - Cap every concurrent leg's worker count explicitly (unit, E2E, backend). An uncapped runner forks
   one worker per CPU and oversubscribes the host alongside the other legs, pushing CPU-bound tests

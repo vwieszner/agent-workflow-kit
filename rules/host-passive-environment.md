@@ -24,8 +24,12 @@ Hook-enforced: `.workflow/hooks/guards/bash_command.py` denies host commands mat
   it is empty, such scripts run in the container.
 - **MCP server runtimes** launched by the agent harness (e.g. `npx`/`uvx` entries in the MCP config)
   are tooling, not app-side, and are allowed. This does not loosen the app-side ban.
-- ❌ Bare `python`/`python3` for project-importing scripts; a project-importing script under
-  `uv run --no-project` (its deps are absent from the ephemeral env).
+- ❌ Bare `python`/`python3` on the host, except for kit scripts and other stdlib-only tooling
+  scripts; a project-importing script under `uv run --no-project` (its deps are absent from the
+  ephemeral env). The bare-python rule is built into the shell guards while
+  `config: env.app_runs_in_container` is true.
+- The guard is a denylist: anything not matched by a built-in rule or `config: guards.host_forbidden`
+  is allowed, so list every app-side command the project must never run on the host.
 
 ## Forbidden installs
 - ❌ **Host:** any installing command — `npm install`, `pip install`, `uv pip install`, `uv sync`,

@@ -51,6 +51,9 @@ readonly: false
 4. **Stack** (`validate: yes`; skipped with a stated reason when `config: stack.runtime = "none"`):
    - schema edits (a `config: pipeline.schema_globs` match) → stop this slot's watch, then `uv run --no-project .workflow/scripts/bring_up_story_stack.py --slot <slot> --project-name <stack_project_name> --worktree <worktree_path> --mode down` (this is `down -v`), then the same with `--mode up`, then `--mode watch` in the background; run each `config: pipeline.post_reset_cmds` entry;
    - dependency, image or compose changes only → `--mode up`;
+   - a `config: env.dependency_files` change → after the stack is up, run each `config: pipeline.dependency_refresh_cmds` entry (rendered with `uv run --no-project .workflow/scripts/wfconfig.py render "<cmd>" --story-id <story_id>`) — `--mode up` does not refresh a named dependency volume;
+   - a `config: pipeline.stack_affecting_globs` change → run each `config: pipeline.reseed_cmds` entry, rendered the same way;
+   - an empty key for a change that needs it → report the change as unhandled in `stack_affecting`, do not improvise a command;
    - then `uv run --no-project .workflow/scripts/stack_preflight.py --project-name <stack_project_name> --worktree <worktree_path>` must PASS.
 5. **Validate once** (`validate: yes`).
    - Regenerate every generated file you took from the target in Step 2.

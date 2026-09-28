@@ -14,6 +14,7 @@
  *   tool.execute.before                     -> PreToolUse guards (throw to block)
  *   tool.execute.after                      -> PostToolUse guard + per-turn tool-call buffer
  *   event: message.part.updated             -> failed tool calls (ToolPart state.status "error")
+ *   event: session.error                    -> MessageAbortedError marks the turn interrupted
  *   event: session.created                  -> SessionStart "startup"/"clear" injectors
  *   event: session.compacted                -> SessionStart "compact" injectors
  *   event: session.idle                     -> Stop: session_journal.py with workflow_tool_calls
@@ -31,12 +32,15 @@
  * Environment:
  *   WORKFLOW_HOOK_RUNNER   command prefix for scripts (default "uv run --no-project";
  *                          e.g. "python3").
- *   WORKFLOW_OPENCODE_SHELL "bash" (default) or "powershell": which shell guard checks the
- *                          `bash` tool (OpenCode exposes every shell kind as tool id "bash").
+ *   WORKFLOW_OPENCODE_SHELL override for the shell kind behind the `bash` tool (OpenCode exposes
+ *                          every shell as tool id "bash"). Without it the kind follows OpenCode's own
+ *                          choice: config `shell`, else $SHELL, else PowerShell on Windows.
+ *                          bash/zsh/sh/... -> Bash guard; pwsh/powershell -> PowerShell guard;
+ *                          cmd -> no shell guard (stated once on stderr).
  *   WORKFLOW_HEADLESS      set in headless child runs (write_handoff.py); the plugin then skips
  *                          journaling, injection and handoff — guards still apply.
  */
-import type { Plugin } from "@opencode-ai/plugin"
+import type { Hooks, Plugin } from "@opencode-ai/plugin"
 import { spawn } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -46,11 +50,31 @@ type ToolCall = { tool: string; input: string; ok: boolean }
 
 const MAX_INPUT = 300
 const RUNNER = (process.env.WORKFLOW_HOOK_RUNNER || "uv run --no-project").split(/\s+/).filter(Boolean)
-const SHELL_KIND = (process.env.WORKFLOW_OPENCODE_SHELL || "bash").toLowerCase()
 const HEADLESS = !!process.env.WORKFLOW_HEADLESS
 
+type ShellGuard = "Bash" | "PowerShell" | "none"
+
+/** Shell guard for a shell path/name, mirroring OpenCode's selection (core/src/shell.ts). */
+function shellGuardFor(shell: string | undefined): ShellGuard | undefined {
+  if (!shell) return undefined
+  const base = shell.replace(/\\/g, "/").split("/").pop()!.toLowerCase().replace(/\.exe$/, "")
+  if (base === "pwsh" || base === "powershell") return "PowerShell"
+  if (base === "cmd") return "none"
+  return "Bash"
+}
+
+function resolveShellGuard(configShell?: string): ShellGuard {
+  return (
+    shellGuardFor(process.env.WORKFLOW_OPENCODE_SHELL) ??
+    shellGuardFor(configShell) ??
+    shellGuardFor(process.env.SHELL) ??
+    (process.platform === "win32" ? "PowerShell" : "Bash")
+  )
+}
+
+let SHELL_KIND: ShellGuard = resolveShellGuard()
+
 const BUILTIN_TOOL_NAMES: Record<string, string> = {
-  bash: SHELL_KIND === "powershell" ? "PowerShell" : "Bash",
   task: "Agent",
   skill: "Skill",
   write: "Write",
@@ -60,6 +84,22 @@ const BUILTIN_TOOL_NAMES: Record<string, string> = {
   grep: "Grep",
   webfetch: "WebFetch",
   websearch: "WebSearch",
+  // OpenCode swaps write/edit for apply_patch on some models (tool/registry.ts); both ids map
+  // to one patch tool whose single arg is `patchText`.
+  apply_patch: "ApplyPatch",
+  patch: "ApplyPatch",
+}
+
+/** Files a patch adds or updates: `*** Add File: <p>` / `*** Update File: <p>` / `*** Move to: <p>`. */
+function patchFiles(patchText: unknown): { added: string[]; updated: string[] } {
+  const added: string[] = []
+  const updated: string[] = []
+  for (const line of String(patchText ?? "").split(/\r?\n/)) {
+    const m = /^\*\*\* (Add File|Update File|Move to): (.+)$/.exec(line.trim())
+    if (!m) continue
+    ;(m[1] === "Add File" ? added : updated).push(m[2].trim())
+  }
+  return { added, updated }
 }
 
 // PreToolUse / PostToolUse wiring — mirrors adapters/claude/settings.hooks.json.
@@ -113,7 +153,10 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
   const injecting = new Map<string, Promise<void>>()
   const turnCalls = new Map<string, ToolCall[]>()
   const turnUserText = new Map<string, string[]>()
+  const lastUserText = new Map<string, string>()
+  const interrupted = new Set<string>()
   const countedCalls = new Set<string>()
+  let cmdNoted = false
 
   function runHook(rel: string, payload: unknown, args: string[] = [], timeoutMs = 60_000): Promise<HookResult> {
     return new Promise((resolve) => {
@@ -169,6 +212,13 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
   }
 
   function claudeToolName(tool: string): string {
+    if (tool === "bash") {
+      if (SHELL_KIND === "none" && !cmdNoted) {
+        cmdNoted = true
+        process.stderr.write("workflow-hooks: shell is cmd — no shell guard applies to the bash tool\n")
+      }
+      return SHELL_KIND === "PowerShell" ? "PowerShell" : SHELL_KIND === "none" ? "Cmd" : "Bash"
+    }
     if (BUILTIN_TOOL_NAMES[tool]) return BUILTIN_TOOL_NAMES[tool]
     // Longest server name first so "a_b" wins over "a" for key "a_b_tool".
     for (const server of [...mcpServers].sort((a, b) => b.length - a.length)) {
@@ -178,7 +228,7 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
     return tool
   }
 
-  function claudeToolInput(name: string, args: any): Record<string, unknown> {
+  function claudeToolInput(name: string, args: any, sessionID?: string): Record<string, unknown> {
     const a = args ?? {}
     switch (name) {
       case "Bash":
@@ -187,7 +237,9 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
       case "Agent":
         return { prompt: a.prompt ?? "", subagent_type: a.subagent_type ?? "", description: a.description }
       case "Skill":
-        return { skill: a.name ?? "", args: a.args ?? "" }
+        // OpenCode's skill tool takes only `name`; the session's latest user text stands in for
+        // the args so phase_dispatch.py can find the story id ("land story 1-2").
+        return { skill: a.name ?? "", args: a.args ?? (sessionID ? lastUserText.get(sessionID) ?? "" : "") }
       case "Write":
         return { file_path: a.filePath ?? "", content: a.content }
       case "Edit":
@@ -220,6 +272,44 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
       if (agent) p.agent_type = agent
     }
     return p
+  }
+
+  /** Journal payload: a child session journals under its parent as `<parent>.sub-<agent>` (DESIGN §8). */
+  async function journalPayload(sessionID: string): Promise<Record<string, unknown>> {
+    const p = await basePayload("Stop", sessionID)
+    const parent = await parentOf(sessionID)
+    if (parent) {
+      p.hook_event_name = "SubagentStop"
+      p.session_id = parent
+      p.agent_id = sessionAgent.get(sessionID) ?? sessionID
+    }
+    return p
+  }
+
+  async function postGuards(name: string, sessionID: string, toolInput: Record<string, unknown>): Promise<string[]> {
+    const notes: string[] = []
+    for (const rel of POST_GUARDS[name] ?? []) {
+      const payload = {
+        ...(await basePayload("PostToolUse", sessionID)),
+        tool_name: name,
+        tool_input: toolInput,
+      }
+      const r = await runHook(rel, payload)
+      // Feedback reaches the agent by appending to the tool output: exit-2 stderr, or
+      // hookSpecificOutput.additionalContext on stdout.
+      let note = r.stderr.trim()
+      const out = r.stdout.trim()
+      if (out.startsWith("{")) {
+        try {
+          const extra = JSON.parse(out)?.hookSpecificOutput?.additionalContext
+          if (extra) note = note ? `${note}\n${extra}` : String(extra)
+        } catch {
+          /* not a hook output object */
+        }
+      }
+      if (note) notes.push(note)
+    }
+    return notes
   }
 
   function runInjectors(sessionID: string, source: string, set: [string, string[]][]): Promise<void> {
@@ -270,6 +360,8 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
   return {
     config: async (cfg: any) => {
       for (const name of Object.keys(cfg?.mcp ?? {})) if (!mcpServers.includes(name)) mcpServers.push(name)
+      // `shell` exists in the runtime config but not in the SDK v1 Config type.
+      SHELL_KIND = resolveShellGuard(typeof cfg?.shell === "string" ? cfg.shell : undefined)
     },
 
     "chat.message": async (input, output) => {
@@ -283,6 +375,7 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
         const list = turnUserText.get(input.sessionID) ?? []
         list.push(text.slice(0, 500))
         turnUserText.set(input.sessionID, list)
+        lastUserText.set(input.sessionID, text.slice(0, 500))
       }
     },
 
@@ -293,7 +386,7 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
       const payload = {
         ...(await basePayload("PreToolUse", input.sessionID)),
         tool_name: name,
-        tool_input: claudeToolInput(name, output.args),
+        tool_input: claudeToolInput(name, output.args, input.sessionID),
       }
       for (const rel of scripts) {
         const reason = denyReason(await runHook(rel, payload))
@@ -304,20 +397,21 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
     "tool.execute.after": async (input, output) => {
       const name = claudeToolName(input.tool)
       countedCalls.add(input.callID)
-      pushCall(input.sessionID, { tool: name, input: summarize(name, input.args), ok: true })
-      const scripts = POST_GUARDS[name]
-      if (!scripts) return
-      const payload = {
-        ...(await basePayload("PostToolUse", input.sessionID)),
-        tool_name: name,
-        tool_input: claudeToolInput(name, input.args),
+      const notes: string[] = []
+      if (name === "ApplyPatch") {
+        // One journal entry per file, as Write/Edit, so the journal and the Write guard see it.
+        const { added, updated } = patchFiles(input.args?.patchText)
+        for (const f of added) {
+          pushCall(input.sessionID, { tool: "Write", input: f, ok: true })
+          notes.push(...(await postGuards("Write", input.sessionID, { file_path: f })))
+        }
+        for (const f of updated) pushCall(input.sessionID, { tool: "Edit", input: f, ok: true })
+        if (!added.length && !updated.length) pushCall(input.sessionID, { tool: name, input: "", ok: true })
+      } else {
+        pushCall(input.sessionID, { tool: name, input: summarize(name, input.args), ok: true })
+        notes.push(...(await postGuards(name, input.sessionID, claudeToolInput(name, input.args, input.sessionID))))
       }
-      for (const rel of scripts) {
-        const r = await runHook(rel, payload)
-        // PostToolUse feedback (stderr, exit 0) reaches the agent by appending to the tool output.
-        const note = r.stderr.trim()
-        if (note) output.output = `${output.output ?? ""}\n\n${note}`
-      }
+      for (const note of notes) output.output = `${output.output ?? ""}\n\n${note}`
     },
 
     event: async ({ event }) => {
@@ -345,17 +439,25 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
           }
           return
         }
+        case "session.error": {
+          const id = e.properties?.sessionID
+          if (id && e.properties?.error?.name === "MessageAbortedError") interrupted.add(id)
+          return
+        }
         case "session.idle": {
           const id = e.properties?.sessionID
           if (!id || HEADLESS) return
           const calls = turnCalls.get(id) ?? []
           const userText = turnUserText.get(id) ?? []
+          const wasInterrupted = interrupted.has(id)
           turnCalls.delete(id)
           turnUserText.delete(id)
+          interrupted.delete(id)
           const payload = {
-            ...(await basePayload("Stop", id)),
+            ...(await journalPayload(id)),
             workflow_tool_calls: calls,
             workflow_user_messages: userText,
+            workflow_interrupted: wasInterrupted,
           }
           await runHook("session/session_journal.py", payload)
           return
@@ -374,7 +476,7 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
         transcript_path: transcript,
       }
       await runHook("session/write_handoff.py", payload, ["--tool", "opencode"], 240_000)
-      await runHook("session/session_retrospective.py", payload)
+      await runHook("session/session_retrospective.py", payload, ["--tool", "opencode"])
     },
 
     "experimental.chat.system.transform": async (input, output) => {
@@ -388,6 +490,6 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
       const text = injected.get(id)
       if (text) output.system.push(text)
     },
-  }
+  } satisfies Hooks
 }
 

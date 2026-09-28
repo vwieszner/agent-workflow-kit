@@ -30,6 +30,17 @@ HOOK = "graph_query.py"
 DEFAULT_EXEMPT = ["index_repository", "list_projects", "delete_project", "index_status"]
 
 
+def _note_g2_skipped(session_id: str) -> None:
+    """G2 cannot run without `config: graph.main_project`: say so once per session."""
+    marker = g.wfconfig.state_dir("locks") / f"graph_query.g2-skipped.{session_id}"
+    if marker.exists():
+        return
+    marker.write_text("", encoding="utf-8")
+    sys.stderr.write("[workflow-hook] graph_query G2 (main-checkout project check) SKIPPED — "
+                     "config graph.main_project is empty. Set it to the graph project name of "
+                     "the main checkout (list_projects).\n")
+
+
 def evaluate(payload: dict) -> int:
     if str(g.cfg("graph.tool", "none")) == "none":
         return 0
@@ -51,6 +62,8 @@ def evaluate(payload: dict) -> int:
     main_project = str(g.cfg("graph.main_project", "") or "")
     slot_only = set(g.cfg_list("guards.slot_only_agents", ["story-impl", "story-finalize", "story-rebase", "story-diagnose"]))
     agent = payload.get("agent_type")
+    if not main_project and agent in slot_only:
+        _note_g2_skipped(str(payload.get("session_id") or "nosession"))
     if main_project and agent in slot_only and project == main_project:
         return g.deny_json(
             f"[workflow-hook] {agent} runs inside a story worktree; project '{main_project}' "

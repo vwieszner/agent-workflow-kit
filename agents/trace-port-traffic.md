@@ -38,7 +38,7 @@ that there is no container stack to trace.
 ## Rules in force
 
 - **Host-passive:** in-container actions go through `<config: stack.compose_cmd> exec -T` /
-  `docker exec`; no application code runs on the host.
+  `<config: stack.engine_cmd> exec`; no application code runs on the host.
 - **Polling heartbeat:** the host-process poll prints a timestamped heartbeat and has an explicit
   budget (`--poll-sec`).
 - **Never a network-wide sniffer:** tcpdump runs only inside the target container with the filter
@@ -95,12 +95,14 @@ Report to the caller:
 
 - **4 — no packets within `capture_timeout`:** traffic stopped during the run. Re-run after
   confirming the logs still show it.
+- **5 — no source IP parsed:** packets arrived but none yielded a parseable source address. Surface
+  the raw capture lines the script printed and ask.
 - **3 — tcpdump unavailable:** package repos unreachable, unsupported image, or non-root exec user.
   Surface the install error; suggest `--exec-user 0` or installing tcpdump in the image.
 - **Host poll caught nothing:** the source closes its socket faster than the poll cadence. Re-run
   with `--poll-interval-ms 10` or a longer `--poll-sec`.
 - **6 — source IP matches neither a gateway nor a container:** the IP belongs to a network the
-  script did not enumerate. Surface the IP + `docker network ls` and ask.
+  script did not enumerate. Surface the IP + `<config: stack.engine_cmd> network ls` and ask.
 - **7 — port not published:** host-origin traffic to an unpublished port; check the compose port
   mapping.
 - **2 — no running container:** the stack is down or the service name is wrong.

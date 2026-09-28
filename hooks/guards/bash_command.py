@@ -10,11 +10,21 @@ Rules (exit 2 + stderr on any match):
      "master"]); a generic `git push` without an explicit `<remote> <git.branch_prefix>...`
      target.
   2. git commit --no-verify / --no-gpg-sign.
+  2a. Destructive commands, always: git reset --hard, git filter-branch,
+      git update-ref -d, Format-Volume, Clear-Disk.
+  2b. Recursive delete (rm -r/-rf/-fr/--recursive) whose target is not strictly inside
+      an allowed root (`config: guards.recursive_delete_allowed`; default: the repo root,
+      the worktrees root, `claude*`/`workflow*` dirs of the system temp dir). `/`, drive
+      roots, `~`/`$HOME` and relative targets escaping via `..` are caught; other
+      variable-based targets (`$dir`) are trusted.
   3. Host package installs (`config: guards.block_host_installs`): pip install,
      python -m pip install, uv pip install, uv sync, uv add/remove without --no-sync.
      Segments that `docker exec` / `docker compose exec` into a container are exempt.
   4. Unquoted backslash paths (`X:\\...` or `seg\\seg`): bash strips unquoted
      backslashes, so the command does not run as written.
+  4a. Bare host `python`/`python3` when `config: env.app_runs_in_container` is true
+      (default). Allowed: container segments, `uv run ...`, `config: env.project_python`,
+      and `.workflow/` kit scripts.
   5. Host-forbidden commands (`config: guards.host_forbidden`): a regex list matched
      against the start of every host command segment. Newlines do not split segments, so
      a heredoc body fed to a container is never flagged.
@@ -24,6 +34,7 @@ Remedy for a legitimate exception: the owner runs the command from their own she
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -38,40 +49,6 @@ HOOK = "bash_command.py"
 _WIN_PATH_RE = re.compile(r"[A-Za-z]:\\|[\w.\-]\\[\w.\-]")
 
 
-def git_violations(cmd: str) -> list[str]:
-    out: list[str] = []
-    main = str(g.cfg("git.main_branch", "main"))
-    base = str(g.cfg("git.base_branch", "development"))
-    protected = g.cfg_list("guards.protected_branches") or [main, base, "master"]
-    prefix = str(g.cfg("git.branch_prefix", "story/"))
-    prot_alt = "|".join(re.escape(b) for b in dict.fromkeys(protected) if b)
-
-    if re.search(r"git\s+push[^|;&]*(--force|--force-with-lease|-f\s|-f$)", cmd, re.IGNORECASE):
-        out.append("[git-push] force-push detected. Forbidden unless the owner explicitly "
-                   "authorizes it. Use a non-force push.")
-
-    if prot_alt and re.search(
-        rf"git\s+push[^|;&]*\s(origin|upstream)\s+({prot_alt})(\s|$|:)", cmd, re.IGNORECASE,
-    ):
-        out.append(f"[git-push] push to a protected branch ({', '.join(protected)}). Forbidden "
-                   "unless the owner explicitly authorizes the push.")
-
-    if re.search(r"(^|[;&|]\s*)git\s+push\s*($|[;&|]|--[a-z])", cmd, re.IGNORECASE | re.MULTILINE):
-        if not re.search(rf"git\s+push[^|;&]*\s(origin|upstream)\s+{re.escape(prefix)}",
-                         cmd, re.IGNORECASE):
-            out.append(f"[git-push] generic 'git push' without an explicit {prefix}<branch> "
-                       f"target. Do not push unless the owner authorizes it; to push a story "
-                       f"branch write 'git push origin {prefix}<id>' explicitly.")
-
-    if re.search(r"git\s+commit[^|;&]*--no-verify", cmd, re.IGNORECASE):
-        out.append("[git-commit] '--no-verify' skips pre-commit hooks. Forbidden unless the "
-                   "owner explicitly authorizes it. Fix the underlying hook failure instead.")
-    if re.search(r"git\s+commit[^|;&]*--no-gpg-sign", cmd, re.IGNORECASE):
-        out.append("[git-commit] '--no-gpg-sign' bypasses commit signing. Forbidden unless "
-                   "the owner explicitly authorizes it.")
-    return out
-
-
 def evaluate(payload: dict) -> int:
     if payload.get("tool_name") != "Bash":
         return 0
@@ -79,7 +56,9 @@ def evaluate(payload: dict) -> int:
     if not isinstance(cmd, str) or not cmd:
         return 0
 
-    violations = git_violations(cmd)
+    violations = g.git_violations(cmd)
+    violations += g.destructive_violations(cmd)
+    violations += g.recursive_delete_violations(cmd, str(payload.get("cwd") or os.getcwd()))
     violations += g.host_install_violations(cmd)
     if _WIN_PATH_RE.search(g.unquoted_residue(cmd)):
         violations.append(
@@ -87,6 +66,7 @@ def evaluate(payload: dict) -> int:
             "('dir\\sub\\x.cmd' becomes 'dirsubx.cmd'), so the command will not run as "
             "written. Quote the path, use forward slashes, or (Windows) use the PowerShell tool."
         )
+    violations += g.host_python_violations(cmd)
     violations += g.host_forbidden_violations(cmd)
     violations += g.command_deny_violations(cmd)
 

@@ -125,7 +125,7 @@ uv run --no-project .workflow/scripts/story_record.py append <story_id> \
   "phase-2 tests GREEN — <test labels run> (<N> tests, exit 0)"
 ```
 
-**Include the exit code.** A test count alone is the claim; the runner's exit code is the result. The word GREEN is load-bearing: `story_record.py check` requires a positive verdict, so a RED or failure line does not satisfy the gate.
+**Include the exit code** (`.workflow/rules/verify-ground-truth.md`). A test count alone is the claim; the runner's exit code is the result. The word GREEN is load-bearing: `story_record.py check` requires a positive verdict, so a RED or failure line does not satisfy the gate.
 
 Your `test_results` return value dies with the orchestrator's conversation. **`.workflow/hooks/guards/phase_dispatch.py` blocks the Phase 3 `story-finalize` dispatch until this line exists.**
 

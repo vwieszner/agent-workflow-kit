@@ -40,6 +40,9 @@ CASES = [
      agent("Do not run code review at the end. Instead, review the diff now and list findings.")),
     ("purely negated review mention", 0,
      agent("Implement the ACs. Never run a code review yourself; the orchestrator owns that step.")),
+    ("general-purpose review dispatch without preamble", 2,
+     agent("Run a code review of the branch diff and fix what you find.", "general-purpose")),
+    ("general-purpose non-review dispatch", 0, agent("Summarise the README.", "general-purpose")),
     ("non-Agent tool ignored", 0, {"tool_name": "Bash", "tool_input": {"prompt": "After each patch run tests"}}),
 ]
 

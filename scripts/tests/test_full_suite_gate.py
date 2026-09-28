@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import re
 import shlex
+import subprocess
 import sys
 import time
 import unittest
@@ -159,6 +160,45 @@ class GateEndToEndTests(unittest.TestCase):
         code, out = self._main()
         self.assertEqual(code, 1, out)
         self.assertIn("gate exited non-zero", out)
+
+    def test_full_cmd_missing_a_required_flag_is_a_config_error(self):
+        root = self._setup(full="green")
+        cfg = root / ".workflow" / "config.toml"
+        cfg.write_text(cfg.read_text(encoding="utf-8")
+                       + '[tests_policy]\nrequired_flags = ["--noinput"]\n', encoding="utf-8")
+        te.clear_caches()
+        code, out = self._main()
+        self.assertEqual(code, 2, out)
+        self.assertIn("--noinput", out)
+
+    def test_schema_drift_is_skipped_and_announced_when_unset(self):
+        self._setup(full="green")
+        code, out = self._main()
+        self.assertEqual(code, 0, out)
+        self.assertIn("schema-drift: SKIPPED", out)
+
+    def test_schema_drift_runs_first_when_a_schema_file_changed(self):
+        root = self._setup(full="green")
+        git = ["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", "base"], check=True)
+        subprocess.run([*git, "checkout", "-qb", "story/1"], check=True)
+        (root / "migrations").mkdir()
+        (root / "migrations" / "0001_initial.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", "schema"], check=True)
+        cfg = root / ".workflow" / "config.toml"
+        drift = f"{shlex.quote(sys.executable)} {shlex.quote(str(root / 'runner.py'))} exit 1"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace(
+            "[tests]\n", f"[tests]\nschema_drift_cmd = {te.toml_str(drift)}\n")
+            + '[git]\nbase_branch = "main"\n[pipeline]\nschema_globs = ["**/migrations/*.py"]\n',
+            encoding="utf-8")
+        te.clear_caches()
+        code, out = self._main()
+        self.assertEqual(code, 1, out)
+        self.assertIn("schema-drift: 1 schema file(s) changed", out)
+        self.assertIn("phase schema-drift", out)
 
     def test_unset_full_cmd_is_a_config_error(self):
         te.enter(self, '[stack]\nruntime = "none"\n')

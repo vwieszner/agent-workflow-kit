@@ -11,6 +11,7 @@ only when its config switch is on; when off, it does not apply and nothing repla
 | Goal and Reasoning | `goal-and-reasoning.md` | State goal + evidence (+ what was rejected) before any consequential action and before any recommendation or verdict. |
 | No Quality Reduction | `no-quality-reduction.md` | Scope is set by the requirement, never by convenience. A reduction is a descope proposal the owner decides. |
 | Root Cause Before Fix | `root-cause-before-fix.md` | Prove the mechanism before fixing. No unproved fixes, test-weakening, silent deferral, or symptom suppression. Labelled mitigations only. |
+| Read Full Docs | `read-full-docs.md` | Read a whole doc/spec/planning file before any conclusion about it; targeted search only to locate. |
 | Verify Ground Truth | `verify-ground-truth.md` | Check the exit code, not the summary line. A subagent report is a claim; verify before relaying. |
 
 ## Always active — testing
@@ -33,7 +34,7 @@ only when its config switch is on; when off, it does not apply and nothing repla
 | Rule | File | Active when |
 |---|---|---|
 | Host-Passive Environment | `host-passive-environment.md` | `config: env.app_runs_in_container = true` — app-side commands only in the container; host tooling paths; forbidden installs; Windows path note. |
-| Live Sync | `live-sync.md` | `config: stack.watch = true` — `compose watch` only, no source volume mounts; verify sync; per-stack code freeze. |
+| Live Sync | `live-sync.md` | `config: stack.runtime != "none"` and `config: stack.watch = true` — `compose watch` only, no source volume mounts; verify sync; per-stack code freeze. |
 | Container Truthfulness | `container-truthfulness.md` | `config: stack.runtime != "none"` — orphaned in-container processes (`/proc`, not `ps`), half-up stacks (`ps -a`, `start` not `up`). |
 | Pre-Production Schema | `preprod-schema.md` | `config: schema.preprod = true` — no new migrations, no back-compat tests, reset stale test/live DBs. |
 

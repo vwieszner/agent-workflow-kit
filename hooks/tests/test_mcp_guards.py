@@ -53,6 +53,18 @@ class GraphQueryTests(HookTestCase):
     def test_other_server_ignored(self):
         self.assertFalse(self.json_denied(GRAPH, {"tool_name": "mcp__other__x", "tool_input": {"project": "nope"}}))
 
+    def test_g2_skipped_without_main_project_is_stated_once(self):
+        self.write_config(
+            f'[graph]\ntool = "codebase-memory-mcp"\nmcp_server = "codebase-memory-mcp"\n'
+            f'main_project = ""\ncache_dir = {json.dumps(str(self.cache))}\n'
+        )
+        p = {"tool_name": "mcp__codebase-memory-mcp__search_graph", "session_id": "s1",
+             "tool_input": {"project": "main-repo"}, "agent_type": "story-impl"}
+        first, second = self.run_hook(GRAPH, p), self.run_hook(GRAPH, p)
+        self.assertIn(b"SKIPPED", first.stderr)
+        self.assertNotIn(b"SKIPPED", second.stderr)
+        self.assertNotIn(b'"deny"', first.stdout)
+
     def test_graph_none_skips(self):
         from _hookenv import BASE_CONFIG
         (self.root / ".workflow" / "config.toml").write_text(BASE_CONFIG, encoding="utf-8")

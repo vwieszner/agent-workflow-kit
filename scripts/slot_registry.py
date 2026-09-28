@@ -97,23 +97,27 @@ def in_use_row(slot: int, story_id: str, branch: str, worktree: str, since: str)
 
 
 def parse_rows(lines: list[str]) -> list[dict]:
-    """Data rows with their line index: {index, slot, status, story_id, branch, worktree, since}."""
+    """Data rows with their line index: {index, slot, status, story_id, branch, worktree, since}.
+
+    The one parser for the format (_registry_lookup reads through it). A missing Since
+    cell is tolerated; fewer than five cells is not a data row.
+    """
     out = []
     for i, line in enumerate(lines):
         if not line.lstrip().startswith("|"):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 6 or not cells[0].isdigit():
+        if len(cells) < 5 or not cells[0].isdigit():
             continue
         clean = ["" if c in ("", EM_DASH, "-", "--") else c for c in cells]
         out.append({"index": i, "slot": int(cells[0]), "status": clean[1].lower(),
                     "story_id": clean[2], "branch": clean[3], "worktree": clean[4],
-                    "since": clean[5]})
+                    "since": clean[5] if len(clean) > 5 else ""})
     return out
 
 
 def read_lines(path: Path) -> list[str]:
-    return path.read_text(encoding="utf-8").splitlines()
+    return path.read_text(encoding="utf-8-sig").splitlines()
 
 
 def write_lines(path: Path, lines: list[str]) -> None:

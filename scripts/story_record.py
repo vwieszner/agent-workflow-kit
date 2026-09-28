@@ -15,8 +15,8 @@ Usage
     uv run --no-project .workflow/scripts/story_record.py check  <story-id> <fact-key>
 
 `append` resolves the story's worktree from the slot registry (`config: paths.slot_registry`),
-writes `<worktree>/<config: paths.specs_dir>/<story-id>-record.md` (main checkout when the
-story holds no slot), creates the file with its heading if absent, prepends today's date,
+writes `<worktree>/<config: paths.specs_dir>/<story-id>-record.md` (creating that dir when the
+worktree exists; main checkout only when the story holds no slot), creates the file with its heading if absent, prepends today's date,
 and refuses an exact duplicate.
 
 Canonical fact lines (the ledger's verdict rules match these):
@@ -69,9 +69,9 @@ FACT_ROWS = {
 }
 
 
-def record_path(story_id: str) -> str:
+def record_path(story_id: str, create: bool = False) -> str:
     vs = variants(story_id)
-    arts, _branch = resolve_roots(vs)
+    arts, _branch = resolve_roots(vs, create=create)
     return os.path.join(arts, f"{vs[0]}-record.md")
 
 
@@ -80,7 +80,7 @@ def cmd_append(story_id: str, fact: str) -> int:
     if not fact:
         print("story-record: refusing to append an empty fact", file=sys.stderr)
         return 2
-    path = record_path(story_id)
+    path = record_path(story_id, create=True)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     line = f"- {date.today().isoformat()} {fact}"
 

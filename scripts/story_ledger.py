@@ -154,17 +154,25 @@ def mentions(text: str, vs: list[str]) -> bool:
 
 # ------------------------------------------------------------------ roots
 
-def resolve_roots(vs: list[str]) -> tuple[str, str | None]:
+def resolve_roots(vs: list[str], create: bool = False) -> tuple[str, str | None]:
     """(artifacts_dir, branch) for this story.
 
     An IN-FLIGHT story's spec, findings, deferred-work and record file live in its
     WORKTREE, and its commits are on the story branch — neither is reachable from the
     main checkout's base branch. Both resolve from the slot registry. A merged story
     falls back to the main checkout, where its files now live.
+
+    `create` (writers only): when the story's worktree exists but its specs dir does not
+    yet, create it rather than fall back. Otherwise a fact written before the spec lands
+    goes to the main checkout, and once the worktree's specs dir appears every reader
+    resolves there and reports the fact missing.
     """
     row = _registry_lookup.find(vs)
     if row and row.get("worktree_path"):
-        arts = os.path.join(str(row["worktree_path"]), specs_rel())
+        wt = str(row["worktree_path"])
+        arts = os.path.join(wt, specs_rel())
+        if create and os.path.isdir(wt):
+            os.makedirs(arts, exist_ok=True)
         if os.path.isdir(arts):
             return arts, (row.get("branch") or None)
     return os.path.join(repo(), specs_rel()), None

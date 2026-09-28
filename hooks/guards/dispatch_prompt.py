@@ -70,7 +70,7 @@ NO_AUTO_APPLY = [
 
 DEFAULT_NON_REVIEW = ["story-spec", "story-impl", "story-finalize", "story-rebase",
                       "story-diagnose", "test-bat-runner",
-                      "dev-preflight", "trace-port-traffic", "general-purpose", "Explore", "Plan"]
+                      "dev-preflight", "trace-port-traffic", "Explore", "Plan"]
 DEFAULT_REVIEW = ["blind-hunter", "edge-case-hunter", "acceptance-auditor",
                   "findings-verifier", "findings-evaluator"]
 

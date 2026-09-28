@@ -239,6 +239,10 @@ git worktree add -b <config: git.branch_prefix><branch_name> <worktree_path> <co
 
 If the worktree already exists (resumed run), skip this and use the existing directory.
 
+Then seed each `config: git.worktree_seed_files` entry: copy it from the repo root into the same
+relative path in the worktree when the worktree has none. Never overwrite a worktree copy; a missing
+source file is a warning, not a failure.
+
 **3b — Bring up the isolated stack** (foreground). Skip 3b–3d, and say so, when
 `config: stack.runtime` is `none`.
 
@@ -336,7 +340,7 @@ uv run --no-project .workflow/scripts/story_record.py append <story_id> "checkpo
 ### Step 6 — `story-impl`
 
 Dispatch the `story-impl` subagent. Pass `story_id`, `branch_name`, `worktree_path`,
-`stack_project_name`, `graph_project`, `spec_path`.
+`stack_project_name`, `slot`, `graph_project`, `spec_path`.
 
 **Append this hard cap to the dispatch prompt:**
 
@@ -352,6 +356,8 @@ When the agent returns:
 
 Invoke the `layered-review` skill three times in sequence from the main session, each on
 `<merge-base>..HEAD` of the story branch. Pass in the args of every invocation:
+
+- The review target: the diff range `<merge-base>..HEAD` and the absolute `spec_path`.
 
 - The dispatch preamble (guard-enforced): every review sub-agent prompt MUST lead with
   `config: review.required_preamble` verbatim. Add, after it: "In this run the findings-evaluator
@@ -489,7 +495,7 @@ the three lists each reading `none — clean review`.
 
 Dispatch the `story-finalize` subagent. Pass `story_id`, `branch_name`, `worktree_path`,
 `stack_project_name`, `graph_project`, `approved_patches` (the manifest), `deferred_findings`,
-`dismissed_findings`, and the findings file path.
+`dismissed_findings`, `round: 1`, and the findings file path.
 
 **Append this hard cap to the dispatch prompt:**
 

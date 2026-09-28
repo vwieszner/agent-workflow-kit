@@ -17,8 +17,9 @@ blocks compaction and always exits 0. If the launch is disabled or fails, the se
 `retro` skill — the in-session, observed path, which calls `--mark` when done.
 
 Analyst selection (`config: curation.analyst`):
-    auto      Claude-shaped payload (has `transcript_path`) → `claude -p <prompt>`,
-              otherwise → `opencode run <prompt>`
+    auto      the calling tool: `--tool claude|opencode` (each adapter passes it) →
+              `claude -p <prompt>` / `opencode run <prompt>`; without `--tool`, a payload with
+              `transcript_path` → claude, otherwise → opencode
     claude    always `claude -p <prompt>`
     opencode  always `opencode run <prompt>`
     off       never launch (equivalent to env WORKFLOW_RETRO_AUTOSPAWN=0)
@@ -166,12 +167,12 @@ HARD CONSTRAINTS:
 """
 
 
-def _analyst_cmd(payload: dict, prompt: str):
+def _analyst_cmd(payload: dict, prompt: str, tool: str | None = None):
     choice = str(wfconfig.get("curation.analyst", "auto")).lower()
     if choice == "off":
         return None
     if choice == "auto":
-        choice = "claude" if payload.get("transcript_path") else "opencode"
+        choice = tool or ("claude" if payload.get("transcript_path") else "opencode")
     if choice == "claude":
         exe = shutil.which("claude")
         return [exe, "-p", prompt] if exe else None
@@ -181,8 +182,8 @@ def _analyst_cmd(payload: dict, prompt: str):
     return None
 
 
-def _launch(payload: dict, session_id: str, facts: int) -> None:
-    cmd = _analyst_cmd(payload, build_prompt(session_id, _run_id()))
+def _launch(payload: dict, session_id: str, facts: int, tool: str | None = None) -> None:
+    cmd = _analyst_cmd(payload, build_prompt(session_id, _run_id()), tool)
     if not cmd:
         return  # leave unmined → nudge points at the retro skill
     cs.proposals_dir().mkdir(parents=True, exist_ok=True)
@@ -204,7 +205,7 @@ def _autospawn_enabled() -> bool:
     return os.environ.get("WORKFLOW_RETRO_AUTOSPAWN", "1").lower() not in ("0", "false", "no", "off")
 
 
-def _hook_mode() -> int:
+def _hook_mode(tool: str | None = None) -> int:
     if os.environ.get("WORKFLOW_RETRO_RUNNING"):
         return 0
     try:
@@ -222,7 +223,7 @@ def _hook_mode() -> int:
         covered = max(marker["analyzed_facts"], marker["launched_facts"])
         if (facts - covered) < _threshold() or not _autospawn_enabled() or _within_cooldown():
             return 0
-        _launch(payload, session_id, facts)
+        _launch(payload, session_id, facts, tool)
     except Exception:  # noqa: BLE001 — markers untouched → nudge fires → owner runs retro
         pass
     return 0
@@ -235,6 +236,7 @@ def main() -> int:
     ap.add_argument("--prompt", action="store_true")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--session", default=None)
+    ap.add_argument("--tool", choices=("claude", "opencode"), default=None)
     args, _ = ap.parse_known_args()
 
     if args.list:
@@ -273,7 +275,7 @@ def main() -> int:
         print(build_prompt(sid, _run_id()))
         return 0
 
-    return _hook_mode()
+    return _hook_mode(args.tool)
 
 
 if __name__ == "__main__":

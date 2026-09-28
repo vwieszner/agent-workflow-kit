@@ -15,8 +15,8 @@ The script:
 
 1. Probes the shared stack (`config: slots.shared_stack_name`) and verifies every service in `config: smoke.services` is running.
 2. Pulls recent log lines from each (window `config: smoke.log_since`) and scans them for `config: smoke.log_error_patterns`.
-3. Runs the read-only `config: stack.health.checks` and, when `config: stack.health.container_src` is set, confirms the containers serve the merged files (source-sync gate over the merge's own file set).
-4. On any failure, classifies the diagnosis (schema/migration drift, dependency or import breakage, env/config change, unknown) with the verbatim log evidence.
+3. When `config: stack.health.container_src` is set, confirms the containers serve the merged files (source-sync gate E, over the merge's own file set). It does not run `config: stack.health.checks` — that is `stack_preflight.py`'s job.
+4. On any failure, classifies the diagnosis with the verbatim log evidence: A (migration/entrypoint failure — a service exits or logs a schema/migration error at startup), A2 (the merge touched schema files and the live store has pending changes), B (dependency or import breakage), C (env/config change), E (source out of sync), D (unknown). A and B/C come from `config: smoke.diagnoses`; A2, D and E are built in.
 5. Prints the recommended fix command; never auto-applies destructive operations (volume wipes, rebuilds, forced recreates) — the owner or orchestrator runs those by hand after reading the diagnosis.
 
 Exit code 0 on green, 1 on any failure.
