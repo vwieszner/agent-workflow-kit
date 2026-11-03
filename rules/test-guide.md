@@ -16,8 +16,10 @@ When `config: env.app_runs_in_container` is true, every test command runs in the
 
 - The full gate owns preflight, slot resolution and output parsing — do not run preflight separately
   ahead of it. Any one leg failing fails the gate.
-- **Concurrent full-gate invocations queue** on a host-global lock (announced periodically). Exhausting
-  the lock timeout (`config: tests.full_lock_timeout_min`) FAILS the run; it never proceeds unlocked.
+- **Concurrent full-gate invocations on one stack queue** on that stack's lock (`config: tests.gate_lock_scope`; announced
+  periodically, served first-come-first-served); gates on different stacks run concurrently.
+  Exhausting the lock timeout (`config: tests.full_lock_timeout_min`) FAILS the run; it never
+  proceeds unlocked.
 - Scoped runs are NOT covered by the gate's preflight: run
   `uv run --no-project .workflow/scripts/stack_preflight.py --project-name <stack> --worktree <worktree-root>`
   yourself first — the worktree root, never its `config: stack.health.worktree_src` subfolder (the

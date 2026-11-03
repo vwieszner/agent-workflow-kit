@@ -24,5 +24,8 @@ something an installed dependency already ships.
 - ❌ An installing command on the host (`host-passive-environment.md`).
 - ❌ Editing the manifest but skipping the image rebuild (the container lacks the package).
 - ❌ Installing a package without committing the updated manifest + lockfile.
+- ❌ Adding a build toolchain (compiler, build-essential) to the runtime image stage. A package that
+  ships no wheel/binary for the platform is built in the base image's builder stage
+  (`config: env.base_image_build_cmd`): rebuild and publish the base, then rebuild the app images.
 - ❌ A tool-version ceiling in the project's tool-version pin that the kit's `uv run` hooks would
   violate — raise the floor instead, together with any image that pins the same tool.

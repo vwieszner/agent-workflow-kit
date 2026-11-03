@@ -13,7 +13,8 @@ Content is built from config:
     Claude tool names, e.g. "mcp__context7__resolve-library-id").
   * `--tool claude` adds a FIRST-ACTION line telling the agent to load the deferred tool
     schemas with ToolSearch (Claude Code defers MCP tool schemas; OpenCode does not).
-Prints nothing when neither part applies. Always exits 0.
+Prints nothing when neither part applies. `text(tool)` returns the same output for
+session_start.py. Always exits 0.
 """
 from __future__ import annotations
 
@@ -70,6 +71,12 @@ def build(tool: str) -> str:
             "runs in the main session and uses these same tools)."
         )
     return "\n".join(parts)
+
+
+def text(tool: str = "claude") -> str:
+    """The directive with a trailing newline, or "" when neither part applies."""
+    out = build(tool)
+    return out + "\n" if out else ""
 
 
 def main(argv: list[str]) -> int:

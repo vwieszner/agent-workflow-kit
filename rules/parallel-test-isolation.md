@@ -44,6 +44,23 @@ store) are shared by every worker.
 - Cap every concurrent leg's worker count explicitly (unit, E2E, backend). An uncapped runner forks
   one worker per CPU and oversubscribes the host alongside the other legs, pushing CPU-bound tests
   past their timeout. Never raise a test timeout to absorb that — restore the cap.
+- The concurrent legs share ONE joint worker budget sized for the host. Never size a leg as if it
+  ran alone (`auto`, one per CPU). Changing one leg's count means re-measuring the gate against the
+  joint budget.
+
+## Per-test timeouts
+- Never raise a runner-wide test or hook timeout, or a wait/find timeout, to make a failure go away.
+- A per-test timeout is the last resort for a test still slower than the per-test budget: only after
+  its root cause is proven, the proven costs are cut (except a cost whose only cut removes asserted
+  behaviour), and its residual is measured. Measure the residual as the median of several whole-leg
+  runs on a quiet host (no other test run on it, CPU samples low throughout); the value is that
+  median times the heaviest host-load factor measured under the full gate, times a 1.25 margin,
+  rounded up, and is recorded per test in the story's measurements.
+- A residual is explained only when its cost is attributed to correct work (for example the render
+  cost of a large page), with the evidence recorded. An unattributed residual goes to the owner.
+- A timeout bump labelled as a mitigation is removed only when measurements taken under full-gate
+  parallel load show the path fits the default budget. Idle-host or isolated runs do not count.
+  Record the figures and the load next to the removal.
 
 ## When to run the full gate before merge
 Run it whenever the change can touch the parallel surface:

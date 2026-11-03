@@ -18,8 +18,8 @@ A fix may not be applied until the **mechanism** of the failure has been demonst
 3. **No silent deferral.** "This code is never called", "nothing uses it yet", "we'll wire it later"
    does not close a finding. Unreached code is either finished and wired, or removed. Tech debt is not
    a triage outcome.
-4. **No symptom suppression.** Swallowing an exception, adding a sleep, bumping a timeout, pinning
-   around a bug, or catching-and-continuing to turn a red signal green is forbidden as a *fix*.
+4. **No symptom suppression.** Swallowing an exception, adding a sleep, bumping a timeout (except a
+   per-test raise meeting `parallel-test-isolation.md` "Per-test timeouts"), pinning around a bug, or catching-and-continuing to turn a red signal green is forbidden as a *fix*.
 
 ## What counts as proof
 At least one of:

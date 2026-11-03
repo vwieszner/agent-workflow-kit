@@ -25,11 +25,18 @@ the OLD schema after the initial migration is edited.
   rebuild on the next run. Dropping them before the merge accomplishes nothing — they rebuild from the
   pre-merge schema.
 - **Live databases** on every stack the edit reaches fail at write time. Pick the reset path:
-  - **Additive change** (new nullable column or column with a default): apply the equivalent `ALTER`
-    directly on each affected stack's live DB. The post-merge smoke applies it on the shared stack.
+  - **Additive change** (new nullable column or column with a default, or an added index or
+    constraint): apply the equivalent `ALTER` (for an index or constraint, the statement the
+    framework's SQL-preview command prints for it) directly on each affected stack's live DB. For an
+    added unique index or constraint, first check that no existing row violates it; if one does, use
+    the structural path. The post-merge smoke applies it on the shared stack.
   - **Structural change** (rename, type change, FK change, dropped column, table rename): full stack
     reset (`config: schema.stack_reset_cmd`, i.e. down with volumes + up with rebuild) on each affected
-    stack. Same on the shared stack immediately post-merge.
+    stack — stop that stack's compose watch first (`.workflow/scripts/kill_owned.py --watch`, or the
+    slot cleanup's watcher stop), and go through `.workflow/scripts/bring_up_story_stack.py`, never a
+    bare compose `down -v`. Same on the shared stack immediately post-merge, after asking the owner.
+  - **Rebase:** when a story rebase finds a migration path in the old-base..target diff, wiping that
+    story's OWN stack as above is pre-authorised. The shared stack and other stories' stacks never are.
 - After any migration edit, and before any test run against a live DB, invoke the `dev-preflight`
   skill (it runs `.workflow/scripts/stack_preflight.py`, the gate) to catch live-DB vs on-disk drift;
   dispatch the `dev-preflight` subagent only to diagnose a red preflight.
