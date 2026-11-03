@@ -70,7 +70,7 @@ class StoryRecordTests(_WorktreeCase):
     config = '[stack]\nruntime = "none"\n[spec]\nexternal_question_tags = ["Designer"]\n'
 
     def test_checkpoint1_refused_while_an_open_question_stands(self):
-        self.spec.write_text("# spec\nAC1 [OPEN-Q 1] which colour? (a), recommended\n", encoding="utf-8")
+        self.spec.write_text("# spec\nAC1 [OPEN-Q 1 which colour? (a), recommended]\n", encoding="utf-8")
         code, out = self.rec("append", "7-2", "checkpoint-1 spec approved")
         self.assertEqual(code, 1, out)
         self.assertIn("open items", out)
@@ -296,8 +296,7 @@ class LandLeaseTests(unittest.TestCase):
         self.path.write_text('{"story": "1-1"}', encoding="utf-8")
         with self.assertRaises(land_lease.LeaseError):
             land_lease.read(self.path)
-        self.assertEqual(quiet(land_lease.cmd_holds, "1-1", )[0] if False else
-                         land_lease.cmd_holds("1-1", path=self.path), 2)
+        self.assertEqual(quiet(lambda: land_lease.cmd_holds("1-1", path=self.path))[0], 2)
 
 
 class MergeTrainUnitTests(unittest.TestCase):
