@@ -17,6 +17,8 @@ Usage:
   skills   → .claude/skills (claude|both — OpenCode reads .claude/skills too)
              .opencode/skills (opencode only)
   agents   → rendered into .claude/agents and/or .opencode/agents
+  workflows→ .claude/workflows (claude|both; Claude Code Workflow scripts — OpenCode runs the
+             same stages through the skill's sequential fallback)
   hooks    → .claude/settings.json hooks + permissions.deny merged (claude|both); the MCP
              guard matchers are rendered from graph.mcp_server / guards.mcp_readonly_servers
              .opencode/plugins/*.ts + .opencode/package.json deps (opencode|both)
@@ -472,6 +474,13 @@ def install(target: Path, tool: str, force: bool, dry: bool) -> int:
             if (tl == "claude" and use_claude) or (tl == "opencode" and use_oc):
                 ins.write(t / d / ag.name, render_agent(ag, tl, wf), owned=False)
                 ins.kit_files.add(f"{d}/{ag.name}")
+
+    # 4b. Claude Code workflow scripts
+    if use_claude and (KIT / "workflows").is_dir():
+        for wfs in sorted((KIT / "workflows").glob("*.js")):
+            ins.write(t / ".claude" / "workflows" / wfs.name,
+                      wfs.read_text(encoding="utf-8"), owned=False)
+            ins.kit_files.add(f".claude/workflows/{wfs.name}")
 
     # 5. hooks
     if use_claude:

@@ -121,3 +121,7 @@ python3 -m unittest discover -s agent-workflow-kit/hooks/tests -p 'test_*.py'
 - The default `opencode.json` permissions allow `bash *` (with push/force/no-verify denied or
   asked) to match an auto-approve working style. Tighten them in your `opencode.json`; the
   installer never overwrites keys you already have.
+
+## License
+
+MIT — see `LICENSE`. Vendored BMad files keep their own MIT notices (`vendor/bmad/`).
