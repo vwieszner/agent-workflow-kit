@@ -54,6 +54,17 @@ up to `config: tests.preflight_wait_s`; still failing, the gate ran no test: it 
 `pre-merge gate not run: preflight failed (...)`, exits 75, withdraws nothing, and releases a
 lease the story holds (the approval stands). Without --record a failing preflight exits 1.
 
+Serving profiles (`config: profiles`, gate_profile.py): with `config: profiles.gate` set, the legs
+named in `config: profiles.gate_legs` ([] = every leg) run under that profile. gate_profile reads
+the running profile first and switches only on a mismatch; a profile that cannot be entered fails
+the legs that need it (NO RESULT) and nothing else. `--profile-leg` adds one more leg after the
+concurrent ones, whatever they returned: `config: profile_leg.cmd` run alone under
+`config: profile_leg.profile`. Afterwards — also after a crash — the stack is returned to its
+resting profile (`profiles.story_resting` / `profiles.shared_resting`); a failed return fails the
+gate (`RESTORE: FAILED`). A green `--profile-leg` run appends a line to the profile-leg state file
+(profile_leg.py), which the land window's `profile_leg.py due` counts merges against. With
+`profiles.gate` empty every profile step is SKIPPED (announced) and `--profile-leg` is a config error.
+
 --hold-lock-for ACTION runs one fixed operation under the shared stack's gate lock instead of
 the suite and exits with its code (1 when the lock is not taken):
   reset-test-dbs   `config: schema.test_db_reset_cmd` (drop reused test databases)
@@ -67,7 +78,7 @@ A shared-stack gate refuses to run while the main checkout has MERGE_HEAD.
 Usage:
   uv run --no-project .workflow/scripts/run_full_suite.py                  # shared stack, main checkout
   uv run --no-project .workflow/scripts/run_full_suite.py --story-id <id>  # the story's slot + worktree
-      [--expected-branch <b>] [--lock-timeout-minutes N] [--record]
+      [--expected-branch <b>] [--lock-timeout-minutes N] [--record] [--profile-leg | --train]
   uv run --no-project .workflow/scripts/run_full_suite.py --hold-lock-for land-merge --story-id <id> --merge-summary "<line>"
 
 Exit codes:
@@ -428,7 +439,8 @@ def _fmt_wall(total_seconds: float | None) -> str:
 
 def summarize(expected: list[str], results: dict, *, phases_exit: int = 0,
               failed_phase: str = "", log_path: str = "", wall: float | None = None,
-              log_tail: list[str] | None = None, fail_re=None, summary_re=None) -> tuple[int, str]:
+              log_tail: list[str] | None = None, fail_re=None, summary_re=None,
+              restore_failure: str = "") -> tuple[int, str]:
     """(exit code, summary text). Fails closed on every leg that is not positively PASSED."""
     fail_re = fail_re or fail_regex()
     summary_re = summary_re or summary_regex()
@@ -445,7 +457,7 @@ def summarize(expected: list[str], results: dict, *, phases_exit: int = 0,
         legs[label] = {"state": "PASSED" if passed else "FAILED", "exit": r["exit"], "parsed": parsed}
 
     all_legs = bool(expected) and all(v["state"] == "PASSED" for v in legs.values())
-    green = all_legs and phases_exit == 0 and not failed_phase
+    green = all_legs and phases_exit == 0 and not failed_phase and not restore_failure
     out: list[str] = []
 
     def _short(v: dict) -> str:
@@ -468,6 +480,8 @@ def summarize(expected: list[str], results: dict, *, phases_exit: int = 0,
     if failed_phase and not results:
         out.append(f"failed — gate aborted in phase {failed_phase} (exit {phases_exit}) "
                    f"before the legs ran{wall_note}")
+    elif all_legs and restore_failure and not failed_phase:
+        out.append(f"failed — all legs passed but RESTORE: FAILED ({restore_failure}){wall_note}")
     elif all_legs:
         out.append(f"failed — all legs passed but the gate exited non-zero (exit {phases_exit}); "
                    f"phase {failed_phase or '?'} failed after the legs{wall_note}")
@@ -487,6 +501,8 @@ def summarize(expected: list[str], results: dict, *, phases_exit: int = 0,
             out += [f"    {tid}" for tid in p["ids"]]
         elif v["state"] == "FAILED":
             out.append("  non-zero exit with no failing id parsed — inspect the log")
+    if restore_failure:
+        out.append(f"RESTORE: FAILED ({restore_failure})")
     if log_tail:
         out.append("")
         out.append(f"Last {len(log_tail)} log lines:")
@@ -587,7 +603,75 @@ def _run_preflight(cmd: list[str], cwd: str, env: dict, wait_seconds: float) -> 
         time.sleep(delay)
 
 
-def _run_gate(ctx: dict, expected_branch: str, env: dict, not_run: list[int] | None = None) -> int:
+def _gate_profile_module():
+    """gate_profile when serving profiles are configured (`config: profiles.gate`), else None."""
+    try:
+        import gate_profile  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return gate_profile if gate_profile.enabled() else None
+
+
+def _run_profiled(ctx: dict, legs: list[tuple[str, str]], profile_leg: bool, env: dict, log_fh,
+                  log_lock) -> tuple[dict, str]:
+    """Run the concurrent legs (the gate-profile legs under `config: profiles.gate`), then the
+    profile leg alone when asked for, then return the stack to its resting profile.
+    Returns (results, restore failure or "")."""
+    gp = _gate_profile_module()
+    results: dict = {}
+    if gp is None:
+        print("profiles: SKIPPED — config: profiles.gate is empty (no serving-profile switch)", flush=True)
+        return run_legs(legs, ctx["worktree"], env, log_fh, log_lock), ""
+    stack = gp.stack_from_ctx(ctx)
+    in_profile = None
+    restore_failure = ""
+    ran_to_completion = False
+    try:
+        try:
+            target = gp.gate_profile()
+            entered, why = gp.ensure(stack, target)
+        except gp.ProfileError as exc:
+            target, entered, why = None, False, str(exc)
+        in_profile = target if entered else None
+        run_now = legs
+        if not entered:
+            needs = {str(x) for x in (wfconfig.get("profiles.gate_legs", []) or [])} or {lbl for lbl, _ in legs}
+            for label, _ in legs:
+                if label in needs:
+                    results[label] = {"exit": None, "text": f"profile not entered: {why}"}
+            run_now = [(lbl, cmd) for lbl, cmd in legs if lbl not in needs]
+        results.update(run_legs(run_now, ctx["worktree"], env, log_fh, log_lock))
+        if profile_leg:
+            import profile_leg as pl
+            label = pl.label()
+            try:
+                target = gp.load(str(wfconfig.get("profile_leg.profile", "")))
+                entered, why = gp.ensure(stack, target)
+            except gp.ProfileError as exc:
+                target, entered, why = None, False, str(exc)
+            in_profile = target if entered else None
+            if entered:
+                results.update(run_legs([(label, pl.command(ctx))], ctx["worktree"], env, log_fh, log_lock))
+            else:
+                results[label] = {"exit": None, "text": f"profile not entered: {why}"}
+        ran_to_completion = True
+    finally:
+        # Every stack ends in its resting profile, also after a crash or a failed switch.
+        try:
+            resting = gp.resting_profile(stack)
+        except gp.ProfileError as exc:
+            resting, restore_failure = None, f"resting profile not resolvable: {exc}"
+        if resting is not None and (in_profile is None or in_profile.name != resting.name):
+            restored, why = gp.ensure(stack, resting)
+            if not restored:
+                restore_failure = f"stack not returned to its resting profile ({resting.name}): {why}"
+        if restore_failure and not ran_to_completion:
+            print(f"RESTORE: FAILED ({restore_failure})", flush=True)
+    return results, restore_failure
+
+
+def _run_gate(ctx: dict, expected_branch: str, env: dict, not_run: list[int] | None = None,
+              profile_leg: bool = False) -> int:
     """Run the gate. `not_run` (a `--record` gate) receives a preflight exit code that still
     failed after the readiness wait (`config: tests.preflight_wait_s`); the caller reports
     that as a gate that ran no test."""
@@ -615,6 +699,9 @@ def _run_gate(ctx: dict, expected_branch: str, env: dict, not_run: list[int] | N
 
     legs = _configured_legs(ctx)
     expected = [label for label, _ in legs]
+    if profile_leg:
+        import profile_leg as pl
+        expected.append(pl.label())
     skipped = [label for label, key in LEGS if label not in expected]
     pre = _schema_drift_phase(ctx) + _phases("tests.full_pre_phases", ctx)
     post = _phases("tests.full_post_phases", ctx)
@@ -628,6 +715,7 @@ def _run_gate(ctx: dict, expected_branch: str, env: dict, not_run: list[int] | N
 
     phases_exit, failed_phase = 0, ""
     results: dict = {}
+    restore_failure = ""
     log_lock = threading.Lock()
     start = time.monotonic()
     with log.open("a", encoding="utf-8", errors="replace") as fh:
@@ -637,9 +725,9 @@ def _run_gate(ctx: dict, expected_branch: str, env: dict, not_run: list[int] | N
                 phases_exit, failed_phase = rc, name
                 break
         if not failed_phase:
-            results = run_legs(legs, worktree, env, fh, log_lock)
+            results, restore_failure = _run_profiled(ctx, legs, profile_leg, env, fh, log_lock)
             legs_ok = all((results.get(lbl) or {}).get("exit") == 0 for lbl in expected)
-            if legs_ok:
+            if legs_ok and not restore_failure:
                 for name, cmd in post:
                     rc = _run_sequential(name, cmd, worktree, env, fh, log_lock)
                     if rc != 0:
@@ -651,7 +739,7 @@ def _run_gate(ctx: dict, expected_branch: str, env: dict, not_run: list[int] | N
     if failed_phase:
         tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-30:]
     code, text = summarize(expected, results, phases_exit=phases_exit, failed_phase=failed_phase,
-                           log_path=str(log), wall=wall, log_tail=tail)
+                           log_path=str(log), wall=wall, log_tail=tail, restore_failure=restore_failure)
     print()
     print(text, flush=True)
     if failed_phase and not results and phases_exit not in (0, 1):
@@ -877,6 +965,10 @@ def main(argv: list[str] | None = None) -> int:
                          "code-tree, base) to the story's record; on any non-zero exit while the story "
                          "holds the land lease, withdraw its checkpoint-3 approval and release the lease; "
                          "a preflight still failing after the readiness wait ran no test: exit 75")
+    ap.add_argument("--profile-leg", action="store_true",
+                    help="also run the profile leg (config: profile_leg) alone under its serving profile after "
+                         "the concurrent legs; a green run is appended to the profile-leg state file "
+                         "(profile_leg.py due)")
     ap.add_argument("--train", action="store_true",
                     help="with --story-id and --record: gate the story's train branch while it waits in the "
                          "land lease's line (merge_train.py); exit 75 with `train gate not run: <reason>` when "
@@ -896,6 +988,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.train and not (args.story_id and args.record):
         ap.error("--train needs --story-id and --record")
+    if args.train and args.profile_leg:
+        ap.error("--train cannot be combined with --profile-leg")
+    if args.profile_leg:
+        import profile_leg as pl
+        if _gate_profile_module() is None or not pl.configured():
+            print("ERROR: --profile-leg needs config: profiles.gate, profile_leg.profile and profile_leg.cmd "
+                  "— the gate was not run")
+            return 2
     if args.train and (_merge_train() is None or _land_lease() is None):
         print("ERROR: --train needs merge_train.py and land_lease.py — the train gate was not run")
         return 2
@@ -971,7 +1071,7 @@ def _gate_main(args: argparse.Namespace, known_head: list[str]) -> tuple[int, bo
             if reason:
                 print(f"{mt.NOT_RUN_MARKER} {reason}", flush=True)
                 return mt.NOT_RUN_EXIT, True
-        if args.record:
+        if args.record or args.profile_leg:
             # Hashed before the run: the code freeze holds the tree for the whole gate.
             from run_scoped_tests import tested_tree
             try:
@@ -986,7 +1086,8 @@ def _gate_main(args: argparse.Namespace, known_head: list[str]) -> tuple[int, bo
         elif args.record and mt is not None:
             mt.mark_holder(args.story_id, str(ctx["worktree"]), "gating")
         not_run: list[int] = []
-        rc = _run_gate(ctx, expected_branch, env, not_run=not_run if args.record else None)
+        rc = _run_gate(ctx, expected_branch, env, not_run=not_run if args.record else None,
+                       profile_leg=args.profile_leg)
         if not_run:
             if args.train:
                 print(f"{mt.NOT_RUN_MARKER} preflight failed (stack_preflight.py exit {not_run[0]})", flush=True)
@@ -997,6 +1098,16 @@ def _gate_main(args: argparse.Namespace, known_head: list[str]) -> tuple[int, bo
                           f"reset: {exc}", flush=True)
                 return mt.NOT_RUN_EXIT, True
             return _preflight_not_run(args.story_id, not_run[0]), True
+        if args.profile_leg and rc == 0:
+            # Before the pre-merge GREEN line: the record never reads green over an uncounted run.
+            import profile_leg as pl
+            state = pl.state_path()
+            try:
+                pl.record_green(state, story=args.story_id or str(ctx["stack"]), head=known_head[0],
+                                tree=tree, base=base)
+            except OSError as exc:
+                print(f"ERROR: the green profile-leg run was NOT recorded in {state}: {exc}")
+                return 1, False
         if args.record and rc == 0:
             from story_record import cmd_append
             if args.train:

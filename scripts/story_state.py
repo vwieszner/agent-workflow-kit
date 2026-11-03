@@ -169,6 +169,14 @@ def arts_of(root) -> str:
     return str(Path(root) / ARTS_REL)
 
 
+def root_of_arts(arts) -> Path:
+    """The checkout an artifacts dir (`arts_of`) belongs to."""
+    root = Path(arts)
+    for _ in Path(ARTS_REL).parts:
+        root = root.parent
+    return root
+
+
 def story_branch(story_id: str) -> str:
     return f"{BRANCH_PREFIX}{story_id}"
 
@@ -369,6 +377,10 @@ def assistant_after(transcript: str, stop: datetime) -> bool:
     return False
 
 
+def journal_dir() -> str:
+    return sl.journal_dir()
+
+
 def scan_running() -> tuple[list[dict] | None, str, list[str]]:
     """(agents, error, unreadable): the running agents from the `.sub-` journal files.
 
@@ -376,15 +388,16 @@ def scan_running() -> tuple[list[dict] | None, str, list[str]]:
     `assistant` record in the agent's own transcript after that stop. `unreadable` names each journal
     file that could not be read; its agents are not listed.
     """
-    jdir = sl.JOURNAL_DIR
+    jdir = journal_dir()
     if not os.path.isdir(jdir):
         return None, f"journal dir {jdir} does not exist", []
     agents, unreadable = [], []
     meta_index: dict[tuple[str, str], str] = {}
-    for mp in sorted(glob.glob(os.path.join(glob.escape(str(PROJECTS_DIR)), "*", "*", "subagents", "**",
-                                            "agent-*.meta.json"), recursive=True)):
-        parts = Path(mp).relative_to(PROJECTS_DIR).parts
-        meta_index.setdefault((parts[1], parts[-1][len("agent-"):-len(".meta.json")]), mp)
+    for project in _transcripts.project_dirs():
+        for mp in sorted(glob.glob(os.path.join(glob.escape(project), "*", "subagents", "**",
+                                                "agent-*.meta.json"), recursive=True)):
+            parts = Path(mp).relative_to(project).parts
+            meta_index.setdefault((parts[0], parts[-1][len("agent-"):-len(".meta.json")]), mp)
     for fp in sorted(glob.glob(os.path.join(glob.escape(jdir), "*.sub-*.jsonl"))):
         session, _, agent_id = os.path.basename(fp)[:-len(".jsonl")].partition(".sub-")
         try:
@@ -468,7 +481,7 @@ def story_set(story_ids, registry, tracker, tracker_keys) -> list[dict]:
                 by_key[key] = entry
         for row in tracker or []:
             key = row["key"]
-            if row["status"] not in ("in-progress", "review", "blocked") or key.startswith("epic-") or key.endswith("-retrospective"):
+            if row["status"] not in ("in-progress", "review", "blocked") or is_epic_key(key):
                 continue
             sid = harness_metrics.short_id(key) or key
             entry = by_key.get(key) or next((e for e in entries.values() if e["story_id"].lower() == sid.lower()), None)
@@ -495,14 +508,10 @@ def find_registry_row(registry, vs: list[str], key: str | None, tracker_keys) ->
 def slot_section(sid, row, registry_text, registry_err) -> dict:
     if registry_err:
         return registry_err
-    project = f"story-{row['story_id'] if row else sid}"
+    project = wfconfig.stack_name(row['story_id'] if row else sid)
     if row is None:
-        return none(REGISTRY_PATH, f"no {project} row in {REGISTRY_PATH}")
-    try:
-        stack = stack_ports.resolve_stack(project, registry_text, MAIN_REPO)
-    except stack_ports.StackError as exc:
-        return none(REGISTRY_PATH, str(exc))
-    return ok(REGISTRY_PATH, slot=stack.slot, branch=row["branch"], worktree=row["worktree"],
+        return none(REGISTRY_PATH, f"no in_use row for {sid} in {REGISTRY_PATH}")
+    return ok(REGISTRY_PATH, slot=row["slot"], branch=row["branch"], worktree=row["worktree"],
               since=row["since"], project=project)
 
 
@@ -513,14 +522,14 @@ def worktree_section(sid, vs, row, worktrees, worktrees_err) -> tuple[dict, str 
         return ok(REGISTRY_PATH, path=path, found_by="slot-registry", exists=os.path.isdir(path)), path
     if worktrees is None:
         return err("git worktree list", worktrees_err), None
-    wanted = {f"refs/heads/story/{v}" for v in vs}
+    wanted = {f"refs/heads/{story_branch(v)}" for v in vs}
     for wt in worktrees:
         if wt["branch"] in wanted:
             return ok("git worktree list", path=wt["path"], found_by="git worktree list",
                       exists=os.path.isdir(wt["path"])), wt["path"]
-    branch = next((f"story/{v}" for v in vs if branch_exists(f"story/{v}")), None)
+    branch = next((story_branch(v) for v in vs if branch_exists(story_branch(v))), None)
     reason = (f"no worktree; branch {branch} exists" if branch
-              else f"no worktree; no branch story/{sid} (looked for refs/heads/story/{{{','.join(vs)}}})")
+              else f"no worktree; no branch {story_branch(sid)} (looked for refs/heads/{BRANCH_PREFIX}{{{','.join(vs)}}})")
     return none("git worktree list", reason, branch=branch, branch_exists=bool(branch)), None
 
 
@@ -536,9 +545,7 @@ def branch_exists(branch: str) -> bool:
 
 
 def bring_up_section(project, worktree) -> dict:
-    if not worktree:
-        return none("<worktree>/.story-setup", "no worktree")
-    path = Path(worktree) / ".story-setup" / f"{project}.json"
+    path = SETUP_DIR / f"{project}.json"
     if not path.is_file():
         return none(path, f"no {path.name} in {path.parent}")
     try:
@@ -548,9 +555,9 @@ def bring_up_section(project, worktree) -> dict:
 
 
 def graph_section(project, worktree) -> dict:
-    if not worktree:
-        return none("<worktree>/.story-setup", "no worktree")
-    path = Path(worktree) / ".story-setup" / f"{project}.graph_project"
+    if str(wfconfig.get("graph.tool", "none")) == "none":
+        return none("config graph.tool", "n/a: config graph.tool is \"none\"")
+    path = SETUP_DIR / f"{project}.graph_project"
     if not path.is_file():
         return none(path, f"no {path.name} in {path.parent}")
     try:
@@ -578,12 +585,14 @@ def parse_json_lines(text: str) -> list[dict]:
 
 def services_section(project, slot_info, worktree_path, worktree) -> dict:
     """`worktree_path` is the story's checked worktree (None when it has none); `worktree` is its section."""
+    if not wfconfig.stack_enabled():
+        return none("config stack.runtime", "n/a: config stack.runtime is \"none\" (no isolated stack)")
     if slot_info is not None and worktree_path:
-        argv = ["docker", "compose", "-p", project, "ps", "-a", "--format", "json"]
-        env = {**os.environ, **stack_ports.port_env(slot_info["slot"])}
-        rc, out, stderr = run(argv, cwd=worktree_path, env=env, timeout=COMPOSE_TIMEOUT_S)
+        argv = _stack.compose_argv(project, "ps", "-a", "--format", "json")
+        env = wfconfig.compose_env(int(slot_info["slot"]))
+        rc, out, stderr = run(argv, cwd=_stack.compose_dir(Path(worktree_path)), env=env, timeout=COMPOSE_TIMEOUT_S)
     else:
-        argv = ["docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
+        argv = [_stack.engine_cmd(), "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
                 "--format", "{{json .}}"]
         rc, out, stderr = run(argv, timeout=COMPOSE_TIMEOUT_S)
     if rc != 0:
@@ -591,7 +600,7 @@ def services_section(project, slot_info, worktree_path, worktree) -> dict:
     try:
         rows = parse_json_lines(out)
     except ValueError as exc:
-        return err(argv_text(argv), f"unparsable docker output: {exc}")
+        return err(argv_text(argv), f"unparsable container-engine output: {exc}")
     if not (slot_info is not None and worktree_path):
         containers = [{"name": r.get("Names"), "state": r.get("State"), "status": r.get("Status")} for r in rows]
         if slot_info is None:
@@ -609,12 +618,12 @@ def services_section(project, slot_info, worktree_path, worktree) -> dict:
     return ok(argv_text(argv),
               services=[{"service": r.get("Service"), "state": r.get("State"), "health": r.get("Health"),
                          "exit_code": r.get("ExitCode")} for r in rows],
-              ready=sorted(bring_up_stack_async.ready_services(rows)),
-              missing=sorted(bring_up_stack_async.EXPECTED_SERVICES - listed))
+              ready=sorted(_stack.ready_services(rows)),
+              missing=sorted(set(_stack.expected_services()) - listed))
 
 
 def ledger_abs(rel: str) -> str:
-    return os.path.normpath(os.path.join(sl.REPO, rel))
+    return os.path.normpath(os.path.join(str(wfconfig.repo_root()), rel))
 
 
 def record_section(vs, arts) -> tuple[dict, list[str] | None]:
@@ -700,8 +709,9 @@ def findings_section(vs, arts) -> dict:
 
 
 def deferred_section(vs, arts) -> dict:
+    deferred = root_of_arts(arts) / DEFERRED_REL
     for v in vs:
-        path = Path(arts) / "deferred-work" / f"story-{v}.md"
+        path = deferred / f"story-{v}.md"
         if not path.is_file():
             continue
         sections = []
@@ -711,7 +721,7 @@ def deferred_section(vs, arts) -> dict:
             elif line.startswith("### ") and sections:
                 sections[-1]["entries"] += 1
         return ok(path, sections=sections)
-    return none(Path(arts) / "deferred-work", f"no story-{{{','.join(vs)}}}.md in {Path(arts) / 'deferred-work'}")
+    return none(deferred, f"no story-{{{','.join(vs)}}}.md in {deferred}")
 
 
 PROPAGATION_ROW_RE = re.compile(r"^\|\s*P\d+\b")
@@ -737,14 +747,14 @@ def parse_propagation(lines: list[str]) -> dict:
 
 
 def propagation_section(vs, worktree) -> dict:
-    """The story's checklist: in its worktree before the land, in story-history/<id>/ after it."""
-    dirs = ([Path(worktree) / ".story-setup"] if worktree else []) + [HISTORY_DIR / v for v in vs]
+    """The story's checklist: in the setup state dir before the land, in <story history>/<id>/ after it."""
+    dirs = [SETUP_DIR] + [HISTORY_DIR / v for v in vs]
     for path in (d / f"propagation-{v}.md" for d in dirs for v in vs):
         if not path.is_file():
             continue
         parsed = parse_propagation(path.read_text(encoding="utf-8", errors="replace").splitlines())
         return ok(path, rows=len(parsed["rows"]), cascades=len(parsed["cascades"]), decided=parsed["decided"])
-    return none(HISTORY_DIR, f"no propagation-{{{','.join(vs)}}}.md in the worktree or {HISTORY_DIR}")
+    return none(HISTORY_DIR, f"no propagation-{{{','.join(vs)}}}.md in {SETUP_DIR} or {HISTORY_DIR}")
 
 
 # ---------------------------------------------------------------- git
@@ -781,7 +791,7 @@ def parse_porcelain(out: str) -> dict[str, dict]:
 
 
 def git_section(cwd, head_ref, with_status: bool) -> dict:
-    """Commits and files since the merge-base with development, read from `cwd` against `head_ref`."""
+    """Commits and files since the merge-base with the base branch, read from `cwd` against `head_ref`."""
     def g(*args):
         argv = ["git", "-C", cwd, *args]
         rc, out, stderr = run(argv, timeout=GIT_TIMEOUT_S)
@@ -825,7 +835,7 @@ def git_section(cwd, head_ref, with_status: bool) -> dict:
 # ---------------------------------------------------------------- agents
 
 def dispatched_section(vs) -> dict:
-    jdir = sl.JOURNAL_DIR
+    jdir = journal_dir()
     if not os.path.isdir(jdir):
         return err(jdir, f"journal dir {jdir} does not exist")
     facts, scanned, nfiles = sl.load_facts(vs)
@@ -834,7 +844,7 @@ def dispatched_section(vs) -> dict:
         if f.get("kind") == "agent_spawned":
             agent_type = f.get("agent_type")
         elif f.get("kind") == "workflow_run" and sl.is_review_workflow(f):
-            agent_type = sl.REVIEW_WORKFLOW
+            agent_type = str(wfconfig.get("review.workflow_name", "review") or "review")
         else:
             continue
         row = {"ts": f.get("ts"), "agent_type": agent_type, "desc": f.get("desc"), "session": f.get("_session"),
@@ -1055,7 +1065,7 @@ def story_forms(registry, tracker, tracker_keys) -> dict[str, set[str]]:
 
     for row in tracker or []:
         key = row["key"]
-        if not (key.startswith("epic-") or key.endswith("-retrospective")):
+        if not is_epic_key(key):
             add(key, key, harness_metrics.short_id(key))
     for row in registry or []:
         if row["status"] == "in_use":
@@ -1066,12 +1076,12 @@ def story_forms(registry, tracker, tracker_keys) -> dict[str, set[str]]:
 
 def worktree_trees(registry, worktrees, tracker_keys) -> list[tuple[str, str]]:
     """(normalised worktree path, identity), longest path first: the registry's in_use rows, then
-    the `story/<id>` branches of `git worktree list`. The main checkout is never one."""
+    the story branches (`config: git.branch_prefix`) of `git worktree list`. The main checkout is never one."""
     trees: dict[str, str] = {}
     for row in registry or []:
         if row["status"] == "in_use" and row["worktree"]:
             trees[norm(row["worktree"])] = story_identity(row["story_id"], tracker_keys)
-    prefix = "refs/heads/story/"
+    prefix = f"refs/heads/{BRANCH_PREFIX}"
     for wt in worktrees or []:
         if (wt["branch"] or "").startswith(prefix):
             trees.setdefault(norm(wt["path"]), story_identity(wt["branch"][len(prefix):], tracker_keys))
@@ -1081,7 +1091,7 @@ def worktree_trees(registry, worktrees, tracker_keys) -> list[tuple[str, str]]:
 
 def lookup_name(name: str, forms) -> set[str]:
     """The identities a session name equals: the id in any form, else an id followed by the two-word
-    suffix Claude Code adds to a duplicate name."""
+    suffix a session listing adds to a duplicate name."""
     hits = forms.get(name.lower())
     if hits:
         return hits
@@ -1191,12 +1201,34 @@ def session_entry(item: dict, forms, trees, run_map, shown, unreadable) -> dict:
     return entry
 
 
+def sessions_argv() -> tuple[list[str] | None, str]:
+    """(the session-listing command, or None with the reason it is unavailable).
+
+    `config: story_state.sessions_cmd` (a list, or a string split on whitespace) wins; "" → by
+    `config: loop.driver_tool`: claude lists with `claude agents --json --all`; opencode has no listing
+    command whose output this reader knows, so the probe is unavailable. The command must print a JSON
+    array of objects carrying the fields of `LISTING_FIELDS`."""
+    configured = wfconfig.get("story_state.sessions_cmd", "") or ""
+    if isinstance(configured, list) and configured:
+        argv = [str(a) for a in configured]
+    elif isinstance(configured, str) and configured.strip():
+        argv = configured.split()
+    elif str(wfconfig.get("loop.driver_tool", "claude")) == "claude":
+        argv = list(CLAUDE_SESSIONS_ARGV)
+    else:
+        return None, ("unavailable: config loop.driver_tool is not claude and config story_state.sessions_cmd "
+                      "is empty, so no session listing is read")
+    return [shutil.which(argv[0]) or argv[0], *argv[1:]], ""
+
+
 def sessions_section(forms, trees, runs, shown, unreadable) -> dict:
-    """Every session `claude agents --json --all` lists, each with the story it belongs to. Entries keep a
+    """Every session the session-listing probe lists, each with the story it belongs to. Entries keep a
     private `_identity` for `take_identities`. `unreadable` maps each failed source feeding `forms` and
     `trees` to its error."""
-    argv = [shutil.which(CLAUDE_AGENTS_ARGV[0]) or CLAUDE_AGENTS_ARGV[0], *CLAUDE_AGENTS_ARGV[1:]]
-    rc, out, stderr = run(argv, cwd=MAIN_REPO, timeout=CLAUDE_AGENTS_TIMEOUT_S)
+    argv, why = sessions_argv()
+    if argv is None:
+        return none(SESSIONS_SOURCE, why)
+    rc, out, stderr = run(argv, cwd=MAIN_REPO, timeout=SESSIONS_TIMEOUT_S)
     if rc != 0:
         return err(SESSIONS_SOURCE, cmd_error(argv, rc, stderr))
     try:
@@ -1224,6 +1256,8 @@ def take_identities(sessions: dict) -> list[str | None]:
 
 
 def session_ids_section(sessions: dict, identities: list, identity: str) -> dict:
+    if sessions["status"] == "none":
+        return none(SESSIONS_SOURCE, sessions["reason"])
     if sessions["status"] != "ok":
         return err(SESSIONS_SOURCE, f"the session listing failed: {sessions['error']}")
     return ok(SESSIONS_SOURCE, ids=[e["key"] for e, who in zip(sessions["entries"], identities) if who == identity])
@@ -1233,24 +1267,22 @@ def session_ids_section(sessions: dict, identities: list, identity: str) -> dict
 
 ATTENTION_SOURCE = "attention queue"
 ATTENTION_NOTE = (
-    SESSIONS_NOTE + " A session started in a checkout whose `.claude/settings.json` predates the Notification "
-    "hook records no event: its waits show from the listing alone (a background session reading status idle "
-    "with state working stays unknown, an interactive idle session is never marked). The record-halt entries "
-    "(a record's latest dated line holding an upper-case HALT and no ruling word) and the Niki entries (a tracker "
-    "row whose Blocks cell holds a warning sign or `interim`) are text rules over free-form files: a halt or "
-    "an interim written another way is not seen. The record-halt rule has two known misses: a halt line whose "
-    "text outside parentheses holds a ruling word gets no entry (`tq-28-record.md:8`), and a later decision "
-    "line that mentions an earlier HALT outside parentheses does get one (`cr-2-record.md:15`). The waits-on rule "
-    "of a halt reads the entry's `asked_of` line and `niki_ticket` line: `niki` while Niki owes (`asked_of` `niki` or "
-    "`both`, or no `asked_of` line and an `RMR1-<n>` ticket) and the ticket's Status cell in the Niki tracker does "
-    "not start with a check mark, `vilmo` otherwise; `asked_of` is never null. A story with several failure "
-    "entries is judged by its latest entry: every `driver-halt` line of the story carries that entry's `asked_of`. "
-    "A `blocked-row` entry's `halt_asked_of` is the failure entry's own `asked_of` line (`null` when there is none), "
-    "and its `asked` is the row's note only when its `note_status` reads `ok`. "
-    "The waits-on rule is a text rule over the Niki tracker's Status cell, and a ticket's answer written another "
-    "way is not seen.")
+    SESSIONS_NOTE + " A session started in a checkout without the Notification hook records no event: its waits "
+    "show from the listing alone (a background session reading status idle with state working stays unknown, an "
+    "interactive idle session is never marked). The record-halt entries (a record's latest dated line holding an "
+    "upper-case HALT and no ruling word outside parentheses) and the external-interim entries (a design-question "
+    "tracker row whose Blocks cell holds a warning sign or `interim`) are text rules over free-form files: a halt "
+    "or an interim written another way is not seen, and a later decision line that mentions an earlier HALT "
+    "outside parentheses does get an entry. The waits-on rule of a halt reads the failure entry's `asked_of` line "
+    "(`owner`, `external` or `both`) and `ticket` line: `external` while the external owner owes (`asked_of` "
+    "`external` or `both`, or no `asked_of` line and a ticket key) and the ticket's Status cell in the tracker "
+    "does not read done (a leading check mark, or done/closed/resolved/answered), `owner` otherwise; `asked_of` "
+    "is never null. A story with several failure entries is judged by its latest entry: every `driver-halt` line "
+    "of the story carries that entry's `asked_of`. A `blocked-row` entry's `halt_asked_of` is the failure "
+    "entry's own `asked_of` line (`null` when there is none), and its `asked` is the row's note only when its "
+    "`note_status` reads `ok`.")
 KIND_RANK = {"open-question": 0, "spec-draft": 1, "record-halt": 2, "driver-halt": 3, "propagation-row": 4,
-             "propagation-cascade": 4, "niki-interim": 5, "blocked-row": 6}
+             "propagation-cascade": 4, "external-interim": 5, "blocked-row": 6}
 MARK_RANK = {"waiting": 0, "failed": 1, "unknown": 2}
 # A story with one of these statuses queues nothing in O1-O5. O6 alone keeps entries for finished stories.
 FINISHED = {"done", "superseded"}
@@ -1261,23 +1293,18 @@ RECORD_LINE_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2})\s+(.*)$")
 HALT_RE = re.compile(r"\bHALT(?:ED)?\b")
 RULED_RE = re.compile(r"\brul(?:ings|ing|ed)\b", re.IGNORECASE)
 FAILURE_HEADING_RE = re.compile(r"^## (\S+) — (\S+) — (.+)$")
-NIKI_TABLE_HEADER_RE = re.compile(r"^\|\s*Ticket\s*\|\s*Item\s*\|\s*Priority\s*\|\s*Blocks\s*\|\s*Status\b")
+DONE_STATUS_RE = re.compile(r"^(?:✅|(?:done|closed|resolved|answered)\b)", re.IGNORECASE)
 # A story id carries a separator: numeric parts joined by `-` or `.`, or a letter prefix, a dash and a number.
-# A bare number (a dimension, a count) is not one. Neither is a decimal, a percentage or a ratio: a token after
-# `@`, a dotted one whose first part is `0`, or a numeric one before `%` or before `:` and a digit
-# (`#DFE2EB@0.50`, `opacity 0.5`, `12.5%`, `3.9:1`). A colon and a space after an id is a label (`tq-21: …`,
-# `16-21: …`). The closing `[-.]\d` stops a shorter prefix of a longer token (`1.2.3:`) from matching once the full
-# token is refused.
+# A bare number, a decimal, a percentage or a ratio is not one; a colon and a space after an id is a label.
 STORY_TOKEN_RE = re.compile(
     r"(?<![\w.@-])(?:[A-Za-z]{1,3}-\d+(?:[-.]\d+)*[a-z]?(?!\w|[-.]\d)"
     r"|(?!0\.)\d+(?:[-.]\d+)+[a-z]?(?![\w%]|:\d|[-.]\d))")
-B8_UNKNOWN_ASKED = ("the listing reads status idle with state working, which cr-1 F7 saw while a session waited "
-                    "for input after an interrupt; no Notification since the session last wrote its transcript")
+B8_UNKNOWN_ASKED = ("the listing reads status idle with state working, which a session waiting for input after an "
+                    "interrupt also shows; no Notification since the session last wrote its transcript")
 B8_UNREADABLE_ASKED = ("the listing reads status idle with state working; its Notification event file could not be "
                        "read (`{file}`)")
-B2_ASKED = "a question asked in prose (state blocked, status idle; cr-1 E2.3)"
-B3_ASKED = ("blocked with no live process: a first-run dialog (cr-1 F1) or a retired session (cr-1 F8); "
-            "attach by id resumes it")
+B2_ASKED = "a question asked in prose (state blocked, status idle)"
+B3_ASKED = ("blocked with no live process: a first-run dialog or a retired session; attaching by id resumes it")
 
 
 def cap(text) -> str:
@@ -1294,43 +1321,47 @@ def attention_shown(registry, tracker, tracker_keys) -> dict[str, str]:
 
 
 def entry_asked(fields: dict) -> str | None:
-    """The entry's `asked_of` value; None when the line is absent or reads anything but vilmo, niki or both."""
+    """The entry's `asked_of` value; None when the line is absent or reads anything but owner, external or both."""
     asked = fields.get("asked_of")
-    return asked if asked in ("vilmo", "niki", "both") else None
+    return asked if asked in ("owner", "external", "both") else None
 
 
-def vilmo_owes(fields: dict | None) -> bool:
-    """True when Vilmo owes the halt a ruling: `asked_of` is `vilmo`, `both` or absent, whatever Niki's part reads.
-    His part stays owed while the entry stands: `resume_halted.py` takes his ruling and removes the entry in one
-    run. False for None (the story has no entry)."""
-    return fields is not None and entry_asked(fields) in ("vilmo", "both", None)
+def owner_owes(fields: dict | None) -> bool:
+    """True when the owner owes the halt a ruling: `asked_of` is `owner`, `both` or absent, whatever the external
+    part reads. The owner's part stays owed while the entry stands: `resume_halted.py` takes the ruling and removes
+    the entry in one run. False for None (the story has no entry)."""
+    return fields is not None and entry_asked(fields) in ("owner", "both", None)
 
 
 def entry_ticket(fields: dict | None) -> str | None:
-    """The first `RMR1-<n>` key in the entry's `niki_ticket` value; None when the line is absent or holds none
-    (`none`, `—`, `n/a` is no ticket)."""
-    found = NIKI_TICKET_RE.search((fields or {}).get("niki_ticket") or "")
+    """The first ticket key (`config: paths.design_ticket_regex`) in the entry's `ticket` value; None when the line
+    is absent or holds none (`none`, `—`, `n/a` is no ticket)."""
+    found = TICKET_RE.search((fields or {}).get("ticket") or "")
     return found.group() if found else None
 
 
-def waits_on(fields: dict | None, niki_rows: list[dict] | None) -> tuple[str, str | None]:
-    """(asked_of, the ticket's Status cell) for a story's latest failure entry, from its parsed `- key: value`
-    `fields` (None: the story has no entry) and the Niki tracker's ticket rows (None: unreadable). The one
-    implementation of the waits-on rule: the attention queue and `resume_halted.py` both call it.
+def ticket_done(status: str | None) -> bool:
+    return status is not None and bool(DONE_STATUS_RE.match(status.strip()))
 
-    Niki owes when `asked_of` is `niki` or `both`, or the entry has no `asked_of` line and a ticket (`entry_ticket`).
-    Her part is open until the ticket's Status starts with a check mark; an `RMR1-<n>` key with no row, no ticket or
-    an unreadable tracker count as open. The result is `niki` while her part is open, else `vilmo`: he owes a
-    ruling (`vilmo_owes`), or the halt asked only Niki, her ticket reads done and the resume is due. Never None. A
-    story with no entry is asked of `vilmo`."""
+
+def waits_on(fields: dict | None, external_rows: list[dict] | None) -> tuple[str, str | None]:
+    """(asked_of, the ticket's Status cell) for a story's latest failure entry, from its parsed `- key: value`
+    `fields` (None: the story has no entry) and the design-question tracker's ticket rows (None: unreadable or
+    not configured). The one implementation of the waits-on rule.
+
+    The external owner owes when `asked_of` is `external` or `both`, or the entry has no `asked_of` line and a
+    ticket (`entry_ticket`). That part is open until the ticket's Status reads done (`ticket_done`); a ticket with
+    no row, no ticket or no readable tracker count as open. The result is `external` while that part is open, else
+    `owner`: the owner owes a ruling (`owner_owes`), or the halt asked only the external owner, the ticket reads
+    done and the resume is due. Never None. A story with no entry is asked of `owner`."""
     if fields is None:
-        return "vilmo", None
+        return "owner", None
     asked = entry_asked(fields)
     ticket = entry_ticket(fields)
-    status = next((r["status"] for r in niki_rows or [] if r["ticket"] == ticket), None) if ticket else None
-    niki_open = (asked in ("niki", "both") or (asked is None and ticket is not None)) \
-        and not (status is not None and status.startswith("✅"))
-    return ("niki" if niki_open else "vilmo"), status
+    status = next((r["status"] for r in external_rows or [] if r["ticket"] == ticket), None) if ticket else None
+    external_open = (asked in ("external", "both") or (asked is None and ticket is not None)) \
+        and not ticket_done(status)
+    return ("external" if external_open else "owner"), status
 
 
 FIELD_RE = re.compile(r"^- (\w+): (.*)$")
@@ -1383,8 +1414,8 @@ def failure_blocks(lines: list[str]) -> list[dict]:
 
 
 def story_branches() -> tuple[set[str] | None, str]:
-    """(every local `story/*` branch, error text): one `git for-each-ref`."""
-    argv = ["git", "-C", MAIN_REPO, "for-each-ref", "--format=%(refname:short)", "refs/heads/story/"]
+    """(every local story branch (`config: git.branch_prefix`), error text): one `git for-each-ref`."""
+    argv = ["git", "-C", MAIN_REPO, "for-each-ref", "--format=%(refname:short)", f"refs/heads/{BRANCH_PREFIX}"]
     rc, out, stderr = run(argv, timeout=GIT_TIMEOUT_S)
     if rc != 0:
         return None, cmd_error(argv, rc, stderr)
@@ -1404,26 +1435,29 @@ class AttentionContext:
         # O4 also stores the identities a heading that names several stories could mean; its `driver-halt` is then
         # their one entry, so O7 emits no `blocked-row` for them.
         self.covered: set[str] = set()
-        self._niki_rows: tuple[list[dict] | None, Exception | None] | None = None
+        self._external_rows: tuple[list[dict] | None, Exception | None] | None = None
 
-    def niki_rows(self) -> list[dict]:
-        """The Niki tracker's ticket rows, parsed once per attention run (O4, O6 and O7 share them); a
-        failed read raises the same exception on every call."""
-        if self._niki_rows is None:
+    def external_rows(self) -> list[dict] | None:
+        """The design-question tracker's ticket rows, parsed once per attention run (the failure, tracker and
+        blocked-row readers share them); None when no tracker is configured; a failed read raises the same
+        exception on every call."""
+        if EXTERNAL_PATH is None:
+            return None
+        if self._external_rows is None:
             try:
-                self._niki_rows = (read_niki_rows(), None)
+                self._external_rows = (read_external_rows(), None)
             except Exception as exc:  # noqa: BLE001 -- re-raised to each caller
-                self._niki_rows = (None, exc)
-        rows, exc = self._niki_rows
+                self._external_rows = (None, exc)
+        rows, exc = self._external_rows
         if exc is not None:
             raise exc
         return rows
 
     def waits_on(self, fields: dict | None) -> tuple[str | None, str | None]:
-        """`waits_on(fields, rows)` over this run's one parse of the Niki tracker."""
+        """`waits_on(fields, rows)` over this run's one parse of the design-question tracker."""
         try:
-            rows = self.niki_rows()
-        except Exception:  # noqa: BLE001 -- the `niki tracker` source reports the failed read
+            rows = self.external_rows()
+        except Exception:  # noqa: BLE001 -- the `external tracker` source reports the failed read
             rows = None
         return waits_on(fields, rows)
 
@@ -1577,7 +1611,7 @@ def session_queue(ctx: AttentionContext, items: list[dict], identities: list, ev
             extra["format"] = "internal"
         if identity is None:
             extra["unlinked_reason"] = item.get("unlinked_reason")
-        out.append(ctx.entry(identity, "session", "vilmo", source, asked, event["received"] if supports else None,
+        out.append(ctx.entry(identity, "session", "owner", source, asked, event["received"] if supports else None,
                              **extra))
     return out
 
@@ -1594,11 +1628,11 @@ class StoryScope:
         if row and os.path.isdir(row["worktree"]):
             self.worktree = row["worktree"]
         else:
-            wanted = {f"refs/heads/story/{v}" for v in self.vs}
+            wanted = {f"refs/heads/{story_branch(v)}" for v in self.vs}
             self.worktree = next((wt["path"] for wt in ctx.worktrees or []
                                   if wt["branch"] in wanted and os.path.isdir(wt["path"])), None)
         root = Path(self.worktree) if self.worktree else MAIN_REPO
-        self.arts = str(root / "docs" / "implementation-artifacts")
+        self.arts = arts_of(root)
 
 
 def story_scopes(ctx: AttentionContext) -> list[StoryScope]:
@@ -1609,7 +1643,7 @@ def story_scopes(ctx: AttentionContext) -> list[StoryScope]:
     keys: dict[str, str | None] = {}
     for row in ctx.tracker:
         key = row["key"]
-        if row["status"] not in FINISHED and not (key.startswith("epic-") or key.endswith("-retrospective")):
+        if row["status"] not in FINISHED and not is_epic_key(key):
             keys.setdefault(key, key)
     for row in ctx.registry or []:
         if row["status"] == "in_use":
@@ -1622,7 +1656,7 @@ def story_scopes(ctx: AttentionContext) -> list[StoryScope]:
 
 def branch_spec(branch: str, vs: list[str]) -> tuple[str, str] | None:
     """(main-checkout path, text) of the spec on `branch`, else None."""
-    rel_dir = "docs/implementation-artifacts/"
+    rel_dir = ARTS_REL.rstrip("/") + "/"
     argv = ["git", "-C", MAIN_REPO, "ls-tree", "--name-only", branch, rel_dir]
     rc, out, stderr = run(argv, timeout=GIT_TIMEOUT_S)
     if rc != 0:
@@ -1643,18 +1677,19 @@ def branch_spec(branch: str, vs: list[str]) -> tuple[str, str] | None:
 def open_question_entries(ctx, scope: StoryScope, file: str, ref: str | None, text: str) -> list[dict]:
     groups: dict[str, dict] = {}
     for n, line in enumerate(text.splitlines(), 1):
-        niki = {OPEN_Q_NUMBER_RE.match(m.group()).group(1) for m in auto_dev_audit.NIKI_MARKER.finditer(line)}
+        external = ({OPEN_Q_NUMBER_RE.search(m.group()).group(1) for m in OPEN_Q_EXTERNAL_RE.finditer(line)}
+                    if OPEN_Q_EXTERNAL_RE is not None else set())
         for m in sl.OPEN_MARKER.finditer(line):
             number = OPEN_Q_NUMBER_RE.match(m.group()).group(1)
-            g = groups.setdefault(number, {"lines": [], "niki": False})
+            g = groups.setdefault(number, {"lines": [], "external": False})
             if not g["lines"] or g["lines"][-1] != n:
                 g["lines"].append(n)
             g.update(marker=m.group(), text=line.strip())
-            g["niki"] = g["niki"] or number in niki
+            g["external"] = g["external"] or number in external
     out = []
     for g in groups.values():
         source = {"file": file, "line": g["lines"][-1], **({"ref": ref} if ref else {})}
-        out.append(ctx.entry(scope.identity, "open-question", "niki" if g["niki"] else "vilmo", source, g["text"],
+        out.append(ctx.entry(scope.identity, "open-question", "external" if g["external"] else "owner", source, g["text"],
                              marker=g["marker"], lines=g["lines"]))
     return out
 
@@ -1667,7 +1702,7 @@ def read_specs(ctx, scopes, branches, branches_err) -> tuple[dict, list[dict]]:
         try:
             found = None
             if scope.worktree is None:
-                branch = next((f"story/{v}" for v in scope.vs if f"story/{v}" in branches), None)
+                branch = next((story_branch(v) for v in scope.vs if story_branch(v) in branches), None)
                 spec = branch_spec(branch, scope.vs) if branch else None
                 found = (spec[0], branch, spec[1]) if spec else None
             if found is None:
@@ -1708,7 +1743,7 @@ def read_records(ctx, scopes) -> tuple[dict, list[dict]]:
         if draft:
             n, line = draft
             date = RECORD_LINE_RE.match(line)
-            entries.append(ctx.entry(scope.identity, "spec-draft", "vilmo", {"file": path, "line": n}, line,
+            entries.append(ctx.entry(scope.identity, "spec-draft", "owner", {"file": path, "line": n}, line,
                                      date.group(1) if date else None))
         dated_lines = [(n, RECORD_LINE_RE.match(line)) for n, line in lines]
         dated_lines = [(n, dated) for n, dated in dated_lines if dated]
@@ -1718,19 +1753,23 @@ def read_records(ctx, scopes) -> tuple[dict, list[dict]]:
         text = dated.group(2)
         outside = strip_parentheses(text)
         if HALT_RE.search(outside) and not RULED_RE.search(outside):
-            entries.append(ctx.entry(scope.identity, "record-halt", "vilmo", {"file": path, "line": n}, text,
+            entries.append(ctx.entry(scope.identity, "record-halt", "owner", {"file": path, "line": n}, text,
                                      dated.group(1)))
     return ok("story records", stories=len(scopes), entries=len(entries)), entries
 
 
 # ---- the out-of-session files
 
+def halted_branch_re() -> re.Pattern:
+    """The `- branch: <prefix><id> (PRESERVED` line `log_failure.py` writes for a kept story branch."""
+    return re.compile(rf"^- branch: {re.escape(BRANCH_PREFIX)}(\S+) \(PRESERVED")
+
+
 def read_failures(ctx, branches, branches_err) -> tuple[dict, list[dict]]:
     if not FAILURES_PATH.is_file():
-        return none(FAILURES_PATH, f"no auto-dev-failures.md at {FAILURES_PATH}"), []
-    # Split on line breaks only (`failure_lines`), the split `resume_halted.py` shares: str.splitlines also breaks at
-    # \x0b, \x0c, \x1c-\x1e, \x85, U+2028 and U+2029, which would give this reader a column-0 field the resume
-    # command's reader does not see.
+        return none(FAILURES_PATH, f"no failure log at {FAILURES_PATH}"), []
+    # Split on line breaks only (`failure_lines`): str.splitlines also breaks at \x0b, \x0c, \x1c-\x1e, \x85,
+    # U+2028 and U+2029, which would give this reader a column-0 field another reader does not see.
     lines = failure_lines(FAILURES_PATH.read_text(encoding="utf-8", errors="replace"))
     entries, stale, halts, covered = [], [], {}, set()
     parsed_entries = failure_blocks(lines)
@@ -1740,11 +1779,11 @@ def read_failures(ctx, branches, branches_err) -> tuple[dict, list[dict]]:
         story_id, stamp, step, start, fields = (parsed[k] for k in ("story_id", "stamp", "step", "start", "fields"))
         branch = None
         for l in lines[start + 1:parsed["end"]]:
-            kept = auto_dev_guard._HALTED_BRANCH.search(l)
+            kept = halted_branch_re().search(l)
             if kept and branch is None:
                 if branches is None:
                     raise RuntimeError(f"cannot list the story branches: {branches_err}")
-                name = f"story/{kept.group(1)}"
+                name = story_branch(kept.group(1))
                 branch = {"name": name, "exists": name in branches,
                           "worktree": next((wt["path"] for wt in ctx.worktrees or []
                                             if wt["branch"] == f"refs/heads/{name}"), None)}
@@ -1757,7 +1796,7 @@ def read_failures(ctx, branches, branches_err) -> tuple[dict, list[dict]]:
         since = local_stamp_utc(stamp)
         if ctx.who(identity)[1] == "blocked":
             halts.setdefault(identity, []).append({
-                "failure_step": failure_step, "niki_ticket": entry_ticket(fields), "branch": branch,
+                "failure_step": failure_step, "ticket": entry_ticket(fields), "branch": branch,
                 "wip_commit": fields.get("wip_commit"), "since": since, "fields": fields})
             continue
         if identity is None:
@@ -1769,28 +1808,23 @@ def read_failures(ctx, branches, branches_err) -> tuple[dict, list[dict]]:
             identity, "driver-halt", asked_of, {"file": str(FAILURES_PATH), "line": start + 1},
             f"{failure_step}: {summary}" if summary else failure_step, since, fallback=story_id,
             failure_step=failure_step, branch=branch, wip_commit=fields.get("wip_commit"),
-            niki_ticket=entry_ticket(fields), ticket_status=ticket_status))
+            ticket=entry_ticket(fields), ticket_status=ticket_status))
     # A heading that names several stories covers their blocked keys, except one with a halt of its own.
     ctx.halts, ctx.covered = halts, covered - set(halts)
     return ok(FAILURES_PATH, entries=len(entries), stale_entries=stale), entries
 
 
 def propagation_files(ctx) -> list[Path]:
-    """Every checklist: each story worktree's `.story-setup/propagation-*.md` (the context's one worktree list),
-    then each landed story's `story-history/<id>/propagation-*.md`."""
-    worktrees = ctx.worktrees
-    if worktrees is None:
-        raise RuntimeError(ctx.worktrees_err)
-    main = Path(MAIN_REPO).resolve()
-    setups = [Path(w["path"]) / ".story-setup" for w in worktrees if Path(w["path"]).resolve() != main]
-    found = [p for d in setups if d.is_dir() for p in sorted(d.glob("propagation-*.md"))]
+    """Every checklist: the setup state dir's `propagation-*.md` (stories not landed yet), then each landed
+    story's `<story history>/<id>/propagation-*.md`."""
+    found = sorted(SETUP_DIR.glob("propagation-*.md")) if SETUP_DIR.is_dir() else []
     return found + (sorted(HISTORY_DIR.glob("*/propagation-*.md")) if HISTORY_DIR.is_dir() else [])
 
 
 def read_propagation(ctx) -> tuple[dict, list[dict]]:
     paths = propagation_files(ctx)
     if not paths:
-        return none(HISTORY_DIR, "no propagation-*.md in a story worktree or story-history/"), []
+        return none(HISTORY_DIR, f"no propagation-*.md in {SETUP_DIR} or {HISTORY_DIR}"), []
     entries, decided, stale, unreadable = [], 0, [], []
     for path in paths:
         story_id = path.name[len("propagation-"):-len(".md")]
@@ -1812,62 +1846,74 @@ def read_propagation(ctx) -> tuple[dict, list[dict]]:
             cell = lambda i: cells[i] if i < len(cells) else ""  # noqa: E731
             row = {"id": re.match(r"P\d+", cells[0]).group(), "file": cell(1), "lines": cell(2), "impact": cell(4),
                    "proposed_edit": cell(5)}
-            entries.append(ctx.entry(identity, "propagation-row", "vilmo", {"file": str(path), "line": n},
+            entries.append(ctx.entry(identity, "propagation-row", "owner", {"file": str(path), "line": n},
                                      f"rule {row['id']} ({row['impact']}): {row['file']} {row['lines']}", since,
                                      fallback=story_id, row=row))
         for n, text in parsed["cascades"]:
-            entries.append(ctx.entry(identity, "propagation-cascade", "vilmo", {"file": str(path), "line": n}, text,
+            entries.append(ctx.entry(identity, "propagation-cascade", "owner", {"file": str(path), "line": n}, text,
                                      since, fallback=story_id, row={"id": re.match(r"- (P\d+)", text).group(1)}))
     extra = {"unreadable": unreadable} if unreadable else {}
     return ok(HISTORY_DIR, files=len(paths), decided_files=decided, entries=len(entries), stale_files=stale,
               **extra), entries
 
 
-def read_niki_rows() -> list[dict]:
-    """The ticket table of the Niki tracker, from its header row to the first line that is not a table line:
-    one row per `RMR1-<n>` ticket, with its Blocks and Status cells."""
-    rows, in_table = [], False
-    for n, line in enumerate(NIKI_PATH.read_text(encoding="utf-8-sig", errors="replace").splitlines(), 1):
+def read_external_rows() -> list[dict]:
+    """The ticket table of the design-question tracker (`config: paths.design_questions`): the first table whose
+    header row has a `Ticket` and a `Status` cell (a `Blocks` cell is optional), up to the first line that is not
+    a table line. One row per ticket key (`config: paths.design_ticket_regex`) in the Ticket cell."""
+    rows, cols = [], None
+    for n, line in enumerate(EXTERNAL_PATH.read_text(encoding="utf-8-sig", errors="replace").splitlines(), 1):
         text = line.strip().lstrip(">").strip()
-        if not in_table:
-            in_table = bool(NIKI_TABLE_HEADER_RE.match(text))
+        if cols is None:
+            if text.startswith("|"):
+                head = [c.strip().lower() for c in text.strip("|").split("|")]
+                if "ticket" in head and "status" in head:
+                    cols = {name: head.index(name) for name in ("ticket", "blocks", "status") if name in head}
             continue
         if not text.startswith("|"):
             break
         cells = [c.strip() for c in text.strip("|").split("|")]
-        ticket = NIKI_TICKET_RE.search(cells[0])
-        if ticket and len(cells) >= 5:
-            rows.append({"ticket": ticket.group(), "blocks": cells[3], "status": cells[-1], "line": n})
-    if not in_table:
-        raise RuntimeError(f"no ticket table (a '| Ticket | Item | Priority | Blocks | Status' header row) in {NIKI_PATH}")
+        if set("".join(cells)) <= set("-: "):
+            continue  # the header's separator row
+        cell = lambda name: cells[cols[name]] if name in cols and cols[name] < len(cells) else ""  # noqa: E731
+        ticket = TICKET_RE.search(cell("ticket"))
+        if ticket:
+            rows.append({"ticket": ticket.group(), "blocks": cell("blocks"), "status": cell("status"), "line": n})
+    if cols is None:
+        raise RuntimeError(f"no ticket table (a header row with Ticket and Status cells) in {EXTERNAL_PATH}")
     return rows
 
 
-def read_niki(ctx) -> tuple[dict, list[dict]]:
-    rows = ctx.niki_rows()
+def read_external(ctx) -> tuple[dict, list[dict]]:
+    if EXTERNAL_PATH is None:
+        return none("config paths.design_questions", "n/a: config paths.design_questions is empty"), []
+    if not EXTERNAL_PATH.is_file():
+        return none(EXTERNAL_PATH, f"no design-question tracker at {EXTERNAL_PATH}"), []
+    rows = ctx.external_rows()
     entries = []
     for row in rows:
         blocks = row["blocks"]
-        if "✅" in row["status"] or not ("⚠" in blocks or re.search(r"\binterims?\b", blocks, re.IGNORECASE)):
+        if ticket_done(row["status"]) or not ("⚠" in blocks or re.search(r"\binterims?\b", blocks, re.IGNORECASE)):
             continue
         identities = list(dict.fromkeys(
             i for i in (ctx.resolve(m.group()) for m in STORY_TOKEN_RE.finditer(blocks)) if i)) or [None]
         for identity in identities:
-            entries.append(ctx.entry(identity, "niki-interim", "niki", {"file": str(NIKI_PATH), "line": row["line"]},
+            entries.append(ctx.entry(identity, "external-interim", "external",
+                                     {"file": str(EXTERNAL_PATH), "line": row["line"]},
                                      f"{row['ticket']}: {blocks}", ticket=row["ticket"]))
-    return ok(NIKI_PATH, rows=len(rows), entries=len(entries)), entries
+    return ok(EXTERNAL_PATH, rows=len(rows), entries=len(entries)), entries
 
 
 def read_blocked(ctx) -> tuple[dict, list[dict]]:
     """One `blocked-row` entry per `blocked` row. `asked` is the row's note only when `note_status` is `ok`: a failed
     `sprint_status.py get` gives `note_status` `error`, the last 300 characters of its message in `note_error` and a
     fixed `asked`, never the error text. The halt fields come from the story's latest failure entry (`null` when it
-    has none). `asked_of` is the `waits_on` result, which reads `vilmo` once Niki's ticket is ✅; `halt_asked_of` is
-    that entry's own `asked_of` line (`entry_asked`)."""
+    has none). `asked_of` is the `waits_on` result, which reads `owner` once the external ticket reads done;
+    `halt_asked_of` is that entry's own `asked_of` line (`entry_asked`)."""
     if ctx.tracker is None:
         raise RuntimeError("the tracker could not be read")
     blocked = [r for r in ctx.tracker if r["status"] == "blocked" and r["key"] not in ctx.covered
-               and not (r["key"].startswith("epic-") or r["key"].endswith("-retrospective"))]
+               and not is_epic_key(r["key"])]
     details = read_tracker_details([r["key"] for r in blocked])
     entries = []
     for row in blocked:
@@ -1882,7 +1928,7 @@ def read_blocked(ctx) -> tuple[dict, list[dict]]:
         entries.append(ctx.entry(
             row["key"], "blocked-row", asked_of, {"file": str(TRACKER_PATH), "line": row.get("line")},
             note, halt.get("since"),
-            failure_step=halt.get("failure_step"), niki_ticket=halt.get("niki_ticket"), ticket_status=ticket_status,
+            failure_step=halt.get("failure_step"), ticket=halt.get("ticket"), ticket_status=ticket_status,
             branch=halt.get("branch"), wip_commit=halt.get("wip_commit"),
             halt_asked_of=entry_asked(halt.get("fields") or {}),
             note_status="ok" if note_read else "error",
@@ -1902,7 +1948,8 @@ def sort_entries(found: list[dict]) -> list[dict]:
 
 def attention_section(sessions, identities, registry, tracker, tracker_src, tracker_keys, worktrees, worktrees_err,
                       shown) -> dict:
-    """Everything that waits on Vilmo or Niki. A source that fails is its own `error` and adds no entries."""
+    """Everything that waits on the owner or an external owner. A source that fails is its own `error` and adds no
+    entries."""
     ctx = AttentionContext(registry, tracker, tracker_keys, worktrees, worktrees_err, shown)
     branches, branches_err = story_branches()
     parts: dict[str, dict] = {}
@@ -1917,6 +1964,8 @@ def attention_section(sessions, identities, registry, tracker, tracker_src, trac
 
     events, unreadable_events, parts["events"] = {}, {}, none(
         ATTENTION_DIR, "the session listing failed, so no event file was read")
+    if sessions["status"] == "none":
+        parts["events"] = none(ATTENTION_DIR, f"no session listing, so no event file was read: {sessions['reason']}")
     if sessions["status"] == "ok":
         try:
             events, unreadable_events, parts["events"] = read_events(sessions["entries"])
@@ -1924,6 +1973,8 @@ def attention_section(sessions, identities, registry, tracker, tracker_src, trac
             events, unreadable_events, parts["events"] = {}, {}, err(ATTENTION_DIR, f"{type(exc).__name__}: {exc}")
 
     def session_source():
+        if sessions["status"] == "none":
+            return none(SESSIONS_SOURCE, sessions["reason"]), []
         if sessions["status"] != "ok":
             return err(SESSIONS_SOURCE, sessions["error"]), []
         queued = session_queue(ctx, sessions["entries"], identities, events, unreadable_events)
@@ -1942,9 +1993,9 @@ def attention_section(sessions, identities, registry, tracker, tracker_src, trac
     collect("records", "story records", lambda: scoped(read_records))
     collect("auto-dev failures", FAILURES_PATH, lambda: read_failures(ctx, branches, branches_err))
     collect("propagation", HISTORY_DIR, lambda: read_propagation(ctx))
-    collect("niki tracker", NIKI_PATH, lambda: read_niki(ctx))
+    collect("external tracker", EXTERNAL_PATH or "config paths.design_questions", lambda: read_external(ctx))
     collect("sprint-status", TRACKER_PATH, lambda: read_blocked(ctx))
-    order = ("sessions", "events", "specs", "records", "auto-dev failures", "propagation", "niki tracker",
+    order = ("sessions", "events", "specs", "records", "auto-dev failures", "propagation", "external tracker",
              "sprint-status")
     return ok(ATTENTION_SOURCE, entries=sort_entries(found), sources={k: parts[k] for k in order},
               note=ATTENTION_NOTE)
@@ -1972,7 +2023,7 @@ def story_git_section(sid, vs, row, worktree_path, worktree) -> dict:
         return git_section(worktree_path, "HEAD", True)
     if worktree["status"] == "ok":  # the registered worktree directory is gone
         candidates = list(dict.fromkeys(([row["branch"]] if row and row.get("branch") else [])
-                                        + [f"story/{v}" for v in vs]))
+                                        + [story_branch(v) for v in vs]))
         branch = next((b for b in candidates if branch_exists(b)), None)
         if branch:
             return git_section(str(MAIN_REPO), branch, False)
@@ -1983,7 +2034,7 @@ def story_git_section(sid, vs, row, worktree_path, worktree) -> dict:
         return git_section(str(MAIN_REPO), branch_ref, False)
     if worktree["status"] == "error":
         return err("git worktree list", worktree["error"])
-    return none("git", f"no worktree and no branch story/{sid}: nothing to read")
+    return none("git", f"no worktree and no branch {story_branch(sid)}: nothing to read")
 
 
 def read_globals() -> tuple:
@@ -2025,7 +2076,7 @@ def build_snapshot(story_ids: list[str] | None = None, with_cost: bool = True) -
         running, running_err, unreadable = scan_running()
     except Exception as exc:  # noqa: BLE001
         running, running_err, unreadable = None, f"scan_running: {type(exc).__name__}: {exc}", []
-    jdir = sl.JOURNAL_DIR
+    jdir = journal_dir()
     if not os.path.isdir(jdir):
         journals = err(jdir, f"journal dir {jdir} does not exist")
     elif running is None:
@@ -2065,7 +2116,7 @@ def build_snapshot(story_ids: list[str] | None = None, with_cost: bool = True) -
     out_stories = []
     for s in stories:
         sid, vs, row = s["story_id"], s["_vs"], s["_row"]
-        project = f"story-{row['story_id'] if row else sid}"
+        project = wfconfig.stack_name(row['story_id'] if row else sid)
         slot = guard(REGISTRY_PATH, "slot_section", lambda: slot_section(sid, row, registry_text, registry_err))
         slot_info = slot if slot["status"] == "ok" else None
         try:
@@ -2073,15 +2124,15 @@ def build_snapshot(story_ids: list[str] | None = None, with_cost: bool = True) -
         except Exception as exc:  # noqa: BLE001 -- the story keeps its other sections
             worktree, wt_path = err("git worktree list", f"worktree_section: {type(exc).__name__}: {exc}"), None
         s["_worktree"] = wt_path if worktree["status"] == "ok" and worktree["exists"] else None
-        setup_src = Path(s["_worktree"]) / ".story-setup" if s["_worktree"] else HISTORY_DIR
+        setup_src = SETUP_DIR
 
         tracker_sec = guard(TRACKER_PATH, "tracker_section",
                             lambda: tracker_section(tracker, tracker_src, s["_join"], s["_key"], details))
 
         if s["_worktree"]:
-            arts, found_by = str(Path(s["_worktree"]) / "docs" / "implementation-artifacts"), "worktree"
+            arts, found_by = arts_of(s["_worktree"]), "worktree"
         else:
-            arts, found_by = str(MAIN_REPO / "docs" / "implementation-artifacts"), "main checkout"
+            arts, found_by = arts_of(MAIN_REPO), "main checkout"
         record, record_lines = record_section(vs, arts)
         git_sec = guard("git", "git_section", lambda: story_git_section(sid, vs, row, s["_worktree"], worktree))
 
@@ -2108,7 +2159,7 @@ def build_snapshot(story_ids: list[str] | None = None, with_cost: bool = True) -
             "worktree": worktree,
             "stack": {"bring_up": guard(setup_src, "bring_up_section", lambda: bring_up_section(project, s["_worktree"])),
                       "graph_project": guard(setup_src, "graph_section", lambda: graph_section(project, s["_worktree"])),
-                      "services": guard(f"docker (project {project})", "services_section",
+                      "services": guard(f"compose (project {project})", "services_section",
                                         lambda: services_section(project, slot_info, s["_worktree"], worktree))},
             "artifacts_root": ok(arts, path=arts, found_by=found_by),
             "position": guard(SCRIPTS_DIR / "story_ledger.py", "position_section",
@@ -2197,8 +2248,11 @@ def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:
-        configure(stack_ports.main_repo_root())
-    except stack_ports.StackError as exc:
+        main_repo = wfconfig.repo_root()
+        if not (main_repo / ".git").exists():
+            raise RuntimeError(f"{main_repo} is not the main checkout (no .git)")
+        configure(main_repo)
+    except Exception as exc:  # noqa: BLE001 -- reported as the usage-level error line
         print(json.dumps({"status": "error", "message": str(exc)}))
         return 2
     document = build_attention() if args.attention else build_snapshot(args.story, with_cost=not args.no_cost)
