@@ -279,14 +279,14 @@ class AttentionTests(World):
 
     def tracker_file(self, rows):
         (self.root / "docs" / "design-questions.md").write_text(
-            "# Questions\n\n| Ticket | Item | Blocks | Status |\n|---|---|---|---|\n"
-            + "".join(f"| {t} | item | {b} | {s} |\n" for t, b, s in rows))
+            "# Questions\n\n| Ticket | Item | Priority | Blocks | Status (2026-01-01) |\n|---|---|---|---|---|\n"
+            + "".join(f"| {t} | item | Medium | {b} | {s} |\n" for t, b, s in rows))
 
     def test_blocked_row_waits_on_external_until_the_ticket_is_done(self):
-        self.failure("1-2", "- asked_of: external\n- ticket: DQ-7")
+        self.failure("1-2", "- asked_of: external\n- external_ticket: DQ-7")
         self.tracker_file([("DQ-7", "1-2", "open")])
         row = next(e for e in self.queue() if e["kind"] == "blocked-row")
-        self.assertEqual((row["asked_of"], row["ticket"], row["ticket_status"]), ("external", "DQ-7", "open"))
+        self.assertEqual((row["asked_of"], row["external_ticket"], row["ticket_status"]), ("external", "DQ-7", "open"))
         self.tracker_file([("DQ-7", "1-2", "✅ answered")])
         row = next(e for e in self.queue() if e["kind"] == "blocked-row")
         self.assertEqual(row["asked_of"], "owner")
@@ -329,10 +329,11 @@ class PureRuleTests(unittest.TestCase):
         old = ss.TICKET_RE
         ss.TICKET_RE = __import__("re").compile(r"\bDQ-\d+\b")
         try:
-            self.assertEqual(ss.waits_on({"ticket": "DQ-1"}, None), ("external", None))
-            rows = [{"ticket": "DQ-1", "status": "Done"}]
-            self.assertEqual(ss.waits_on({"asked_of": "both", "ticket": "DQ-1"}, rows), ("owner", "Done"))
-            self.assertEqual(ss.waits_on({"asked_of": "external", "ticket": "DQ-2"}, rows), ("external", None))
+            self.assertEqual(ss.waits_on({"external_ticket": "DQ-1"}, None), ("external", None))
+            rows = [{"ticket": "DQ-1", "status": "✅ Done"}]
+            self.assertEqual(ss.waits_on({"asked_of": "both", "external_ticket": "DQ-1"}, rows), ("owner", "✅ Done"))
+            self.assertEqual(ss.waits_on({"asked_of": "external", "external_ticket": "DQ-2"}, rows),
+                             ("external", None))
         finally:
             ss.TICKET_RE = old
 

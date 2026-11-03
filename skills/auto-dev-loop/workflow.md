@@ -18,6 +18,10 @@ has not installed (`land_lease.py`, `merge_train.py`, `branch_overlap.py`) are s
 Every operation below is **pre-authorized**. Do NOT ask for confirmation on any of these — asking
 IS a bug in this mode. Anything this list does not name is not pre-authorized.
 
+- The story's design-owner ticket (§"Design ticket"), at any halt and in Step 4's design filing:
+  the tracker search, create and comment calls (`tracker.py`, or the tracker MCP tools of
+  `config: tracker.mcp_tools`) for that story's `(<config: design.question_tag>)` questions only, and
+  `design_ticket.py` (`tracker-row`, `commit-tracker`, `mark-spec`).
 - `halt_release.py` (the halt-and-release procedure): the WIP commit in the story worktree, the
   sprint-status flip to `blocked`, the failure-log entry, the lease release, the kill of the
   worktree's orphan `compose watch`, `{compose} -p <stack> stop` (containers stopped; logs and data
@@ -199,13 +203,20 @@ None. The skill picks its own work.
 Used by every failure path in Steps 3–11, including any dispatch that returns output marked partial
 (it hit its turn limit; never resume or retry it): `failure_step="<agent>-max-turns"`.
 
-1. **Questions.** Every question the failure leaves open goes into the failure summary, numbered.
-   A question about a design value, an undrawn state or other screen behaviour is the owner's like
-   any other.
+1. **Questions.** Every question the failure leaves open goes into the failure summary, numbered,
+   and is tagged `(owner)` or `(<tag>)` (`<tag>` = `config: design.question_tag`; with no design owner
+   configured every question is `(owner)`). The design owner's: a design value, a
+   documentation-vs-design contradiction, an undrawn state, routing, a click target or other screen
+   behaviour. The owner's: a product or scope decision, anything irreversible or outward-facing, two
+   source-of-truth docs that contradict each other. `(<tag>)` questions go on the story's ticket first
+   (§"Design ticket").
 2. **Run the halt** (the main checkout's script, never a story branch's copy):
    ```bash
-   uv run --no-project .workflow/scripts/halt_release.py --story-id "<story_id>" --failure-step "<failure_step>" --failure-summary "<one-sentence summary, then the numbered questions>" --last-test-output "<last 30 lines or empty>"
+   uv run --no-project .workflow/scripts/halt_release.py --story-id "<story_id>" --failure-step "<failure_step>" --failure-summary "<one-sentence summary, then the numbered questions>" --asked-of "<owner|external|both>" --last-test-output "<last 30 lines or empty>"
    ```
+   `--asked-of`: whose answers the halt waits on (`owner` for a failure that asks nothing, too).
+   `external` and `both` need `--external-ticket <key> --external-item "<the tracker row's Item cell>"`;
+   any non-empty `--external-ticket` must be one ticket key (`config: paths.design_ticket_regex`).
    It keeps the worktree, branch and stack and releases only the slot: draft marker (for a
    `story-spec*` step), WIP commit, the sprint-status note's `HALTED <date> at <step>; worktree kept`
    clause (status `blocked`), the failure entry, lease release, orphan watch kill, stack stop, slot
@@ -213,17 +224,33 @@ Used by every failure path in Steps 3–11, including any dispatch that returns 
    steps by hand.
 3. **Exit 0** (`"status": "halted"`): done. **Exit 1** (`"status": "partial"`): its JSON names each
    failed step; stop the loop and report them (driver mode: `outcome=infra-stop`). **Exit 2**
-   (`"refused"`): a line break in `--story-id` or `--failure-step`; fix the arguments and run again.
+   (`"refused"`): a missing `--asked-of`, a bad `--external-ticket`, or a line break in an argument;
+   fix the arguments and run again.
 4. **Loop back to Step 1.** The failed story has a failure-log entry; `milestone-blockers` reports it
    as halted, never as startable.
 
-**Resume** (the owner, once the questions are answered):
+**Resume** (the owner, once the questions are answered — the design owner's part when the ticket's
+tracker row reads done):
 `uv run --no-project .workflow/scripts/resume_halted.py <story_id> --ruling '<the ruling>'`
-(`--no-ruling` when the halt asked nothing; the ruling goes in single quotes, each single quote
-inside it written `'\''`). It archives the entry with the ruling in the story history, removes it,
+(`--no-ruling` when the halt asked nothing or only the design owner; the ruling goes in single quotes,
+each single quote inside it written `'\''`). `resume_halted.py` refuses while the design owner's part
+is open. It archives the entry with the ruling in the story history, removes it,
 sets the row `ready-for-dev` and commits; Step 1 can then pick the story, Step 3 reuses the worktree,
 Step 3a′ applies the ruling. **Discard** (the owner only):
 `uv run --no-project .workflow/scripts/cleanup_story_stack.py <branch_name>`.
+
+### Design ticket
+
+With a design owner configured (`config: design.question_tag`) and a tracker (`config: tracker.backend`
+not `none`), invoke the `design-ticket` skill: one ticket per story, only the questions it does not
+already carry, the tracker row, the spec markers. In this loop its `origin` is
+`auto-dev, the <story_id> <step>`.
+- At a halt, pass the ticket to `halt_release.py --external-ticket <key> --external-item "<the tracker's
+  Item cell>"` and skip the skill's tracker step: the halt writes and commits the row.
+- A failed tracker call: halt without `--external-ticket` (`--asked-of owner`), the error quoted in the
+  failure summary. The driver's audit then stops the run; the interactive loop reports it and goes on.
+- No design owner or no tracker configured: `(<tag>)` questions are the owner's; halt with
+  `--asked-of owner`.
 
 ---
 
@@ -297,8 +324,11 @@ When `merge_train.py` is installed, first run `merge_train.py home <story_id>` (
 train branch goes back to the story branch; exit 2: halt-and-release, `failure_step="resume-rebase"`).
 
 Then apply the answers. Read the latest `resumed halt` block of
-`sprint_status.py history <story-key>` (the halted entries verbatim after a `ruling:` line). An answer
-that lives in the spec lands there now: an `[OPEN-Q <n>]` marker is replaced by its ruling. Any other
+`sprint_status.py history <story-key>` (the halted entries verbatim after a `ruling:` line). Two kinds
+of answer apply: the block's `ruling:` line (the owner's), and the design owner's rulings on the
+`external_ticket` of the block's latest entry, read from the ticket (`tracker.py comments --key <key>`)
+and the design-question tracker. An answer that lives in the spec lands there now: an `[OPEN-Q <n>]`
+marker, or an `OPEN-Q <n> (<tag>, interim ⚠️, <key>)` marker, is replaced by its ruling. Any other
 answer goes into the dispatch prompt (or the evaluator's input) of the halted step, built by the
 session that runs it. Append `halt answers applied <entry id>` with `story_record.py append` and commit
 the spec edit and the record line on the story branch (`docs: [Story <story_id>] halt answers applied`).
@@ -352,8 +382,13 @@ uv run --no-project .workflow/scripts/story_record.py open <story_id>
 ```
 
 - Exit 0 → 4b.
-- Exit 1 with `[OPEN-Q` lines: halt-and-release, `failure_step="spec-open-questions"`, every marked
-  question in the failure summary.
+- Exit 1 with `[OPEN-Q` lines that are all `(<tag>)` (design owner configured): run the **design
+  filing** below, then re-run the check. A marker the filing leaves bracketed (filed with the interim
+  `none — the story waits for the design`: a missing layout or screen) halts with
+  `failure_step="spec-open-questions"`, `--asked-of external` and the ticket.
+- Exit 1 with other `[OPEN-Q` lines: halt-and-release, `failure_step="spec-open-questions"`, every
+  marked question in the failure summary (`--asked-of owner`, or `both` with the ticket when `(<tag>)`
+  markers stand too).
 - Exit 1 with only a `spec-draft incomplete` record line: dispatch `story-spec` as below with
   `existing_draft: true`; then items 2–4.
 - `no spec found` (exit 1 or 2): halt-and-release, `failure_step="spec-check"`.
@@ -374,9 +409,20 @@ With `spec_present: false`:
    best-effort decisions (the recommended option) in the spec and marks a question that is the
    owner's call `[OPEN-Q <n>]`; it returns `spec_path`, `elicitation_rounds` and `open_questions`.
 2. Set `spec_path`; record `spec-draft complete (story-spec auto mode, <N> elicitation rounds)`.
-3. Any `open_questions`: halt-and-release, `failure_step="spec-open-questions"`, every numbered
-   question in the failure summary. The WIP commit keeps the draft with its markers.
+3. If `open_questions` holds any `(<tag>)` question, run the **design filing** first: a value or a
+   state carries story-spec's derived interim; a missing layout or screen is filed with the interim
+   `none — the story waits for the design`. Then, if it holds an owner question or a `(<tag>)` question
+   filed with no interim: halt-and-release, `failure_step="spec-open-questions"`, every numbered
+   question in the failure summary, `--asked-of` from who the remaining questions wait on. The WIP
+   commit keeps the draft with its markers.
 4. A failed dispatch after the retry: halt-and-release, `failure_step="story-spec"`.
+
+**Design filing.** File every `(<tag>)` question the story's ticket does not already carry
+(§"Design ticket"); a question already on it is not posted again. For a new ticket, add its row to the
+design-question tracker and commit only that hunk (`design_ticket.py tracker-row` + `commit-tracker`),
+then rewrite the spec's markers (`design_ticket.py mark-spec`) and commit the spec on the story branch
+(`docs: [Story <story_id>] design questions filed (<key>)`). The interim ships ⚠️ until the design owner
+rules; `design-sync` routes the ruling later.
 
 **4b — Record checkpoint-1.** The loop stands in for the owner's spec approval. Append exactly one:
 

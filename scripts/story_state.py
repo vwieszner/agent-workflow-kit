@@ -78,6 +78,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
+import _design  # noqa: E402
 import _stack  # noqa: E402
 import _transcripts  # noqa: E402
 import harness_metrics  # noqa: E402
@@ -157,7 +158,7 @@ def configure(main_repo: Path) -> None:
     BASE_BRANCH = _rel("git.base_branch", "development")
     BRANCH_PREFIX = str(wfconfig.get("git.branch_prefix", "story/") or "")
     EXTERNAL_TAGS = [str(t) for t in (wfconfig.get("spec.external_question_tags", []) or []) if str(t).strip()]
-    TICKET_RE = re.compile(_rel("paths.design_ticket_regex", r"\b[A-Z][A-Z0-9]+-\d+\b"))
+    TICKET_RE = _design.ticket_re()
     # An `[OPEN-Q <n> ...]` marker tagged for an external owner: `(<tag>` inside the brackets or right after them
     # (the same rule as `story_record.py`).
     OPEN_Q_EXTERNAL_RE = (re.compile(r"\[OPEN-Q \d+[^\]\n]*?\((?:%s)\b[^\]\n]*\]|\[OPEN-Q \d+[^\]\n]*\][`*]*\s*\((?:%s)\b"
@@ -1274,9 +1275,9 @@ ATTENTION_NOTE = (
     "tracker row whose Blocks cell holds a warning sign or `interim`) are text rules over free-form files: a halt "
     "or an interim written another way is not seen, and a later decision line that mentions an earlier HALT "
     "outside parentheses does get an entry. The waits-on rule of a halt reads the failure entry's `asked_of` line "
-    "(`owner`, `external` or `both`) and `ticket` line: `external` while the external owner owes (`asked_of` "
+    "(`owner`, `external` or `both`) and `external_ticket` line: `external` while the external owner owes (`asked_of` "
     "`external` or `both`, or no `asked_of` line and a ticket key) and the ticket's Status cell in the tracker "
-    "does not read done (a leading check mark, or done/closed/resolved/answered), `owner` otherwise; `asked_of` "
+    "does not start with the done marker (`config: design.done_marker`), `owner` otherwise; `asked_of` "
     "is never null. A story with several failure entries is judged by its latest entry: every `driver-halt` line "
     "of the story carries that entry's `asked_of`. A `blocked-row` entry's `halt_asked_of` is the failure "
     "entry's own `asked_of` line (`null` when there is none), and its `asked` is the row's note only when its "
@@ -1293,7 +1294,6 @@ RECORD_LINE_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2})\s+(.*)$")
 HALT_RE = re.compile(r"\bHALT(?:ED)?\b")
 RULED_RE = re.compile(r"\brul(?:ings|ing|ed)\b", re.IGNORECASE)
 FAILURE_HEADING_RE = re.compile(r"^## (\S+) — (\S+) — (.+)$")
-DONE_STATUS_RE = re.compile(r"^(?:✅|(?:done|closed|resolved|answered)\b)", re.IGNORECASE)
 # A story id carries a separator: numeric parts joined by `-` or `.`, or a letter prefix, a dash and a number.
 # A bare number, a decimal, a percentage or a ratio is not one; a colon and a space after an id is a label.
 STORY_TOKEN_RE = re.compile(
@@ -1334,14 +1334,15 @@ def owner_owes(fields: dict | None) -> bool:
 
 
 def entry_ticket(fields: dict | None) -> str | None:
-    """The first ticket key (`config: paths.design_ticket_regex`) in the entry's `ticket` value; None when the line
-    is absent or holds none (`none`, `—`, `n/a` is no ticket)."""
-    found = TICKET_RE.search((fields or {}).get("ticket") or "")
+    """The first ticket key (`config: paths.design_ticket_regex`) in the entry's `external_ticket` value
+    (`log_failure.py --external-ticket`); None when the line is absent or holds none."""
+    found = TICKET_RE.search((fields or {}).get("external_ticket") or "")
     return found.group() if found else None
 
 
 def ticket_done(status: str | None) -> bool:
-    return status is not None and bool(DONE_STATUS_RE.match(status.strip()))
+    """The tracker's done rule (`_design.is_done`: the Status starts with `config: design.done_marker`)."""
+    return _design.is_done(status)
 
 
 def waits_on(fields: dict | None, external_rows: list[dict] | None) -> tuple[str, str | None]:
@@ -1796,7 +1797,7 @@ def read_failures(ctx, branches, branches_err) -> tuple[dict, list[dict]]:
         since = local_stamp_utc(stamp)
         if ctx.who(identity)[1] == "blocked":
             halts.setdefault(identity, []).append({
-                "failure_step": failure_step, "ticket": entry_ticket(fields), "branch": branch,
+                "failure_step": failure_step, "external_ticket": entry_ticket(fields), "branch": branch,
                 "wip_commit": fields.get("wip_commit"), "since": since, "fields": fields})
             continue
         if identity is None:
@@ -1808,7 +1809,7 @@ def read_failures(ctx, branches, branches_err) -> tuple[dict, list[dict]]:
             identity, "driver-halt", asked_of, {"file": str(FAILURES_PATH), "line": start + 1},
             f"{failure_step}: {summary}" if summary else failure_step, since, fallback=story_id,
             failure_step=failure_step, branch=branch, wip_commit=fields.get("wip_commit"),
-            ticket=entry_ticket(fields), ticket_status=ticket_status))
+            external_ticket=entry_ticket(fields), ticket_status=ticket_status))
     # A heading that names several stories covers their blocked keys, except one with a halt of its own.
     ctx.halts, ctx.covered = halts, covered - set(halts)
     return ok(FAILURES_PATH, entries=len(entries), stale_entries=stale), entries
@@ -1858,17 +1859,20 @@ def read_propagation(ctx) -> tuple[dict, list[dict]]:
 
 
 def read_external_rows() -> list[dict]:
-    """The ticket table of the design-question tracker (`config: paths.design_questions`): the first table whose
-    header row has a `Ticket` and a `Status` cell (a `Blocks` cell is optional), up to the first line that is not
-    a table line. One row per ticket key (`config: paths.design_ticket_regex`) in the Ticket cell."""
+    """The ticket table of the design-question tracker (`config: paths.design_questions`, the format `_design.py`
+    documents): the first table whose header row has a `Ticket` and a `Status` cell (the Status header may carry
+    a sync date; a `Blocks` cell is optional), up to the first line that is not a table line. One row per ticket
+    key (`config: paths.design_ticket_regex`) in the Ticket cell."""
     rows, cols = [], None
     for n, line in enumerate(EXTERNAL_PATH.read_text(encoding="utf-8-sig", errors="replace").splitlines(), 1):
         text = line.strip().lstrip(">").strip()
         if cols is None:
             if text.startswith("|"):
                 head = [c.strip().lower() for c in text.strip("|").split("|")]
-                if "ticket" in head and "status" in head:
-                    cols = {name: head.index(name) for name in ("ticket", "blocks", "status") if name in head}
+                found = {name: next((i for i, h in enumerate(head) if h == name or h.startswith(name + " ")), None)
+                         for name in ("ticket", "blocks", "status")}
+                if found["ticket"] is not None and found["status"] is not None:
+                    cols = {name: i for name, i in found.items() if i is not None}
             continue
         if not text.startswith("|"):
             break
@@ -1928,7 +1932,7 @@ def read_blocked(ctx) -> tuple[dict, list[dict]]:
         entries.append(ctx.entry(
             row["key"], "blocked-row", asked_of, {"file": str(TRACKER_PATH), "line": row.get("line")},
             note, halt.get("since"),
-            failure_step=halt.get("failure_step"), ticket=halt.get("ticket"), ticket_status=ticket_status,
+            failure_step=halt.get("failure_step"), external_ticket=halt.get("external_ticket"), ticket_status=ticket_status,
             branch=halt.get("branch"), wip_commit=halt.get("wip_commit"),
             halt_asked_of=entry_asked(halt.get("fields") or {}),
             note_status="ok" if note_read else "error",
