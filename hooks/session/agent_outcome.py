@@ -57,7 +57,7 @@ SCRIPTS = Path(__file__).resolve().parent.parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import wfconfig  # noqa: E402
 
-DEFAULT_REPRO_NAME = r"^(test_(?:repro|pbt)_r\d+_\d+\.py|repro_r\d+_\d+\.test\.[jt]sx?|repro-r\d+-\d+\.spec\.[jt]s)$"
+DEFAULT_REPRO_NAME = r"^(test_(?:repro|pbt)_r\d+_\d+\.py|repro_r\d+_\d+\.test\.[cm]?[jt]sx?|repro-r\d+-\d+\.spec\.[cm]?[jt]s)$"
 _TRACKED = re.compile(r"\*\*Tracked in[.:]\*\*\s*`([^`]+)`\s*—\s*`([^`]+)`")
 CAP = 3
 CLAIMS = {"impl": "✅ story-impl complete", "finalize": "✅ story-finalize complete",

@@ -14,7 +14,9 @@
       "PowerShell(*git filter-branch*)",
       "PowerShell(*git update-ref *-d*)",
       "PowerShell(*Format-Volume*)",
-      "PowerShell(*Clear-Disk*)"
+      "PowerShell(*Clear-Disk*)",
+      "Edit(.workflow/state/kill-tokens/**)",
+      "Write(.workflow/state/kill-tokens/**)"
     ]
   },
   "hooks": {
@@ -24,11 +26,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/dispatch_prompt.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/dispatch_prompt.py\"",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/phase_dispatch.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/phase_dispatch.py\"",
+            "timeout": 90
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/agent_dispatch.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/clear_offer.py\"",
+            "timeout": 30
           }
         ]
       },
@@ -37,7 +51,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/phase_dispatch.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/phase_dispatch.py\"",
+            "timeout": 90
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/auto_dev_keep.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/clear_offer.py\"",
+            "timeout": 30
           }
         ]
       },
@@ -46,11 +71,48 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/bash_command.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/bash_command.py\"",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/agent_source_read.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/agent_source_read.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/process_kill.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/auto_dev_keep.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/clear_offer.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/mutation_command.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/repro_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/story_write_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/propagate_paths.py\"",
+            "timeout": 30
           }
         ]
       },
@@ -59,11 +121,103 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/powershell_command.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/powershell_command.py\"",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/agent_source_read.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/agent_source_read.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/process_kill.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/auto_dev_keep.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/clear_offer.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/mutation_command.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/repro_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/story_write_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/propagate_paths.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/review_run_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/review_code_paths.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/repro_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/story_write_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/propagate_paths.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/land_lease_wait.py\"",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "StructuredOutput",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/review_coverage.py\"",
+            "timeout": 30
           }
         ]
       }
@@ -74,7 +228,30 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/script_registration.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/script_registration.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/scripts/check_agent_frontmatter.py\" --hook",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptExpansion": [
+      {
+        "matcher": "auto-dev-loop",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/auto_dev_keep.py\"",
+            "timeout": 30
           }
         ]
       }
@@ -84,7 +261,40 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_journal.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_journal.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/guards/land_lease_wait.py\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_journal.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_journal.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/agent_outcome.py\" --role repro",
+            "timeout": 60
           }
         ]
       }
@@ -95,12 +305,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/write_handoff.py\" --tool claude",
-            "timeout": 200
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_retrospective.py\" --tool claude"
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_retrospective.py\" --tool claude",
+            "timeout": 60
           }
         ]
       },
@@ -109,7 +315,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_retrospective.py\" --tool claude"
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_retrospective.py\" --tool claude",
+            "timeout": 60
           }
         ]
       }
@@ -120,11 +327,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/check_pending_proposals.py\""
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_story_ledger.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_start.py\" startup",
+            "timeout": 90
           }
         ]
       },
@@ -133,11 +337,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/check_pending_proposals.py\""
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_story_ledger.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_start.py\" clear",
+            "timeout": 90
           }
         ]
       },
@@ -146,15 +347,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_handoff.py\""
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_symbol_nav_directive.py\" --tool claude"
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_story_ledger.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_start.py\" compact",
+            "timeout": 90
           }
         ]
       },
@@ -163,25 +357,41 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_handoff.py\""
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_symbol_nav_directive.py\" --tool claude"
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_story_ledger.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_start.py\" resume",
+            "timeout": 90
           }
         ]
       }
     ],
-    "SubagentStop": [
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/notification.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/notification.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "InstructionsLoaded": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_journal.py\""
+            "command": "uv run --no-project \"$CLAUDE_PROJECT_DIR/.workflow/hooks/session/instructions_loaded.py\"",
+            "timeout": 30
           }
         ]
       }

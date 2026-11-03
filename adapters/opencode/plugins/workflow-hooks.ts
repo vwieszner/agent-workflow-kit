@@ -18,7 +18,7 @@
  *   event: session.created                  -> SessionStart "startup"/"clear" injectors
  *   event: session.compacted                -> SessionStart "compact" injectors
  *   event: session.idle                     -> Stop: session_journal.py with workflow_tool_calls
- *   experimental.session.compacting         -> PreCompact: write_handoff.py + session_retrospective.py
+ *   experimental.session.compacting         -> PreCompact: session_retrospective.py
  *   experimental.chat.system.transform      -> context injection (see below)
  *
  * Context injection: OpenCode has no stdout-to-context channel for session start. The supported
@@ -37,8 +37,13 @@
  *                          choice: config `shell`, else $SHELL, else PowerShell on Windows.
  *                          bash/zsh/sh/... -> Bash guard; pwsh/powershell -> PowerShell guard;
  *                          cmd -> no shell guard (stated once on stderr).
- *   WORKFLOW_HEADLESS      set in headless child runs (write_handoff.py); the plugin then skips
- *                          journaling, injection and handoff — guards still apply.
+ *   WORKFLOW_HEADLESS      set in headless child runs (the retrospective analyst, driver phases);
+ *                          the plugin then skips journaling and injection — guards still apply.
+ *
+ * Guard results: a stdout `hookSpecificOutput.updatedInput` (process_kill.py rewriting a
+ * kill_owned.py call) replaces the tool args before the call runs. Guards that need a Claude
+ * transcript file (review_coverage, land_lease_wait, clear_offer, context_cap) are not wired or
+ * fail open here.
  */
 import type { Hooks, Plugin } from "@opencode-ai/plugin"
 import { spawn } from "node:child_process"
@@ -103,27 +108,37 @@ function patchFiles(patchText: unknown): { added: string[]; updated: string[] } 
 }
 
 // PreToolUse / PostToolUse wiring — mirrors adapters/claude/settings.hooks.json.
+const SHELL_COMMON = [
+  "guards/agent_source_read.py",
+  "guards/process_kill.py",
+  "guards/auto_dev_keep.py",
+  "guards/mutation_command.py",
+  "guards/repro_paths.py",
+  "guards/story_write_paths.py",
+  "guards/propagate_paths.py",
+]
+const WRITE_GUARDS = ["guards/repro_paths.py", "guards/story_write_paths.py", "guards/propagate_paths.py"]
+const READ_GUARDS = ["guards/review_run_paths.py", "guards/review_code_paths.py"]
 const PRE_GUARDS: Record<string, string[]> = {
-  Agent: ["guards/dispatch_prompt.py", "guards/phase_dispatch.py"],
-  Skill: ["guards/phase_dispatch.py"],
-  Bash: ["guards/bash_command.py", "guards/agent_source_read.py"],
-  PowerShell: ["guards/powershell_command.py", "guards/agent_source_read.py"],
+  Agent: ["guards/dispatch_prompt.py", "guards/phase_dispatch.py", "guards/agent_dispatch.py"],
+  Skill: ["guards/phase_dispatch.py", "guards/auto_dev_keep.py"],
+  Bash: ["guards/bash_command.py", ...SHELL_COMMON],
+  PowerShell: ["guards/powershell_command.py", ...SHELL_COMMON],
+  Read: READ_GUARDS,
+  Grep: READ_GUARDS,
+  Glob: READ_GUARDS,
+  Write: WRITE_GUARDS,
+  Edit: WRITE_GUARDS,
 }
-const MCP_PRE_GUARDS = ["guards/graph_query.py", "guards/mcp_readonly.py"]
+// Each MCP guard checks the server named in config itself and passes other servers.
+const MCP_PRE_GUARDS = ["guards/graph_query.py", "guards/mcp_readonly.py", "guards/playwright_paths.py"]
 const POST_GUARDS: Record<string, string[]> = {
   Write: ["guards/script_registration.py"],
 }
 
-const STARTUP_INJECTORS: [string, string[]][] = [
-  ["session/check_pending_proposals.py", []],
-  ["session/inject_story_ledger.py", []],
-]
-const COMPACT_INJECTORS: [string, string[]][] = [
-  ["session/inject_handoff.py", []],
-  ["session/inject_symbol_nav_directive.py", ["--tool", "opencode"]],
-  ["session/inject_story_ledger.py", []],
-]
-const RESUME_INJECTORS = COMPACT_INJECTORS
+const STARTUP_INJECTORS: [string, string[]][] = [["session/session_start.py", ["startup", "--tool", "opencode"]]]
+const COMPACT_INJECTORS: [string, string[]][] = [["session/session_start.py", ["compact", "--tool", "opencode"]]]
+const RESUME_INJECTORS: [string, string[]][] = [["session/session_start.py", ["resume", "--tool", "opencode"]]]
 
 function sanitize(v: string): string {
   // Same rule OpenCode uses to build MCP tool keys (packages/opencode/src/mcp/catalog.ts).
@@ -197,6 +212,18 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
     })
   }
 
+  /** A guard's rewritten tool input (`hookSpecificOutput.updatedInput`), if any. */
+  function updatedInput(r: HookResult): Record<string, unknown> | null {
+    const out = r.stdout.trim()
+    if (!out.startsWith("{")) return null
+    try {
+      const u = JSON.parse(out)?.hookSpecificOutput?.updatedInput
+      return u && typeof u === "object" ? u : null
+    } catch {
+      return null
+    }
+  }
+
   function denyReason(r: HookResult): string | null {
     if (r.code === 2) return r.stderr.trim() || "blocked by workflow hook"
     const out = r.stdout.trim()
@@ -246,6 +273,9 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
         return { file_path: a.filePath ?? "", old_string: a.oldString, new_string: a.newString }
       case "Read":
         return { file_path: a.filePath ?? "" }
+      case "Grep":
+      case "Glob":
+        return { pattern: a.pattern ?? "", path: a.path ?? "", ...(a.include ? { glob: a.include } : {}) }
       default:
         return typeof a === "object" ? a : { value: a }
     }
@@ -381,16 +411,41 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
 
     "tool.execute.before": async (input, output) => {
       const name = claudeToolName(input.tool)
+      if (name === "ApplyPatch") {
+        // Each file the patch adds or updates passes the Write guards before the patch runs.
+        const { added, updated } = patchFiles(output.args?.patchText)
+        for (const f of [...added, ...updated]) {
+          const payload = {
+            ...(await basePayload("PreToolUse", input.sessionID)),
+            tool_name: "Write",
+            tool_input: { file_path: f },
+          }
+          for (const rel of WRITE_GUARDS) {
+            const reason = denyReason(await runHook(rel, payload))
+            if (reason) throw new Error(reason)
+          }
+        }
+        return
+      }
       const scripts = name.startsWith("mcp__") ? MCP_PRE_GUARDS : PRE_GUARDS[name]
       if (!scripts) return
-      const payload = {
+      const payload: Record<string, unknown> = {
         ...(await basePayload("PreToolUse", input.sessionID)),
         tool_name: name,
         tool_input: claudeToolInput(name, output.args, input.sessionID),
       }
       for (const rel of scripts) {
-        const reason = denyReason(await runHook(rel, payload))
+        const r = await runHook(rel, payload)
+        const reason = denyReason(r)
         if (reason) throw new Error(reason)
+        const upd = updatedInput(r)
+        if (upd) {
+          // Later guards see the rewritten input; the shell tool runs the rewritten command.
+          payload.tool_input = upd
+          if ((name === "Bash" || name === "PowerShell") && typeof upd.command === "string") {
+            if (output.args) output.args.command = upd.command
+          }
+        }
       }
     },
 
@@ -475,7 +530,6 @@ export const WorkflowHooks: Plugin = async ({ client, directory, worktree }) => 
         cwd: root,
         transcript_path: transcript,
       }
-      await runHook("session/write_handoff.py", payload, ["--tool", "opencode"], 240_000)
       await runHook("session/session_retrospective.py", payload, ["--tool", "opencode"])
     },
 

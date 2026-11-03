@@ -6,7 +6,18 @@ tier: standard
 effort: high
 tools: [read, grep, glob, bash, task, graph, monitor]
 readonly: true
-claude: {maxTurns: 490, skills: [rules-graph-nav]}
+claude:
+  maxTurns: 490
+  skills: [rules-graph-nav]
+  hooks:
+    Stop:
+      - hooks:
+          - type: command
+            command: 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/agent_outcome.py" --role diagnose'
+    PostToolUse:
+      - hooks:
+          - type: command
+            command: 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/context_cap.py" --role diagnose'
 ---
 
 # Story Diagnose Agent

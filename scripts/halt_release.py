@@ -50,7 +50,7 @@ sys.path.insert(0, str(SCRIPTS))
 import _bookkeeping as bk  # noqa: E402
 import wfconfig  # noqa: E402
 
-DEFAULT_REPRO_NAME = r"^(test_(?:repro|pbt)_r\d+_\d+\.py|repro_r\d+_\d+\.test\.[jt]sx?|repro-r\d+-\d+\.spec\.[jt]s)$"
+DEFAULT_REPRO_NAME = r"^(test_(?:repro|pbt)_r\d+_\d+\.py|repro_r\d+_\d+\.test\.[cm]?[jt]sx?|repro-r\d+-\d+\.spec\.[cm]?[jt]s)$"
 # The step is read lazily, up to the first "; worktree kept", so a step that holds ";" is still stripped.
 LEAD_CLAUSE = re.compile(r"^(?:STARTED \S+ slot \d+ \([^)]*\)|HALTED \S+ at .+?; worktree kept)")
 

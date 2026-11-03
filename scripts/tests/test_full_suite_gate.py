@@ -211,5 +211,108 @@ class GateEndToEndTests(unittest.TestCase):
         self.assertEqual(code, 2, out)
 
 
+class TrainGateTests(unittest.TestCase):
+    """`--train`: the train checks run under the gate lock (a failed check exits 75 and withdraws nothing);
+    a green train gate records the train GREEN line on the train branch and marks the train green; a red one
+    withdraws the approval through merge_train.withdraw."""
+
+    _setup = GateEndToEndTests._setup
+    _main = GateEndToEndTests._main
+
+    def _fakes(self, root, reason=None):
+        from unittest import mock
+        calls = []
+
+        class LL:
+            LeaseError = OSError
+            @staticmethod
+            def default_path():
+                return root / "lease.json"
+            @staticmethod
+            def read(path):
+                return None
+
+        class MT:
+            TrainError = RuntimeError
+            NOT_RUN_MARKER = "train gate not run:"
+            NOT_RUN_EXIT = 75
+            @staticmethod
+            def not_run_reason(story, worktree, expected):
+                calls.append(("check", expected))
+                return reason
+            @staticmethod
+            def begin_gate(story, path):
+                calls.append(("begin", story))
+                return ["1-1"]
+            @staticmethod
+            def finish_green(story, path):
+                calls.append(("green", story))
+            @staticmethod
+            def withdraw(story, rc, head, path):
+                calls.append(("withdraw", rc))
+            @staticmethod
+            def reset_train(story, path):
+                calls.append(("reset", story))
+            @staticmethod
+            def mark_holder(story, worktree, state):
+                calls.append(("holder", state))
+            @staticmethod
+            def heartbeat(story, path):
+                import contextlib
+                return contextlib.nullcontext()
+
+        appended = []
+        ctx = {"worktree": str(root), "stack": "story-1-2", "branch": "story/1-2", "story_id": "1-2", "slot": 1}
+        for target, value in (("_merge_train", lambda: MT), ("_land_lease", lambda: LL),
+                              ("resolve_target", lambda *a: (dict(ctx), None)),
+                              ("base_of", lambda w: "b" * 40)):
+            patcher = mock.patch.object(run_full_suite, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        import run_scoped_tests, story_record
+        for mod, name, value in ((run_scoped_tests, "tested_tree", lambda w: ("h" * 12, "t" * 12)),
+                                 (story_record, "cmd_append", lambda sid, fact: appended.append(fact) or 0)):
+            patcher = mock.patch.object(mod, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return calls, appended
+
+    def test_a_failed_train_check_exits_75_and_withdraws_nothing(self):
+        root = self._setup(full="green")
+        calls, appended = self._fakes(root, reason="it is not 1-2's gate turn")
+        code, out = self._main("--story-id", "1-2", "--record", "--train")
+        self.assertEqual(code, 75, out)
+        self.assertIn("train gate not run: it is not 1-2's gate turn", out)
+        self.assertEqual(calls, [("check", "train/1-2")])
+        self.assertEqual(appended, [])
+
+    def test_a_green_train_gate_records_the_train_line_and_marks_it_green(self):
+        root = self._setup(full="green")
+        calls, appended = self._fakes(root)
+        code, out = self._main("--story-id", "1-2", "--record", "--train")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(appended), 1)
+        self.assertIn("pre-merge gate GREEN -- run_full_suite all legs on train/1-2 (exit 0)", appended[0])
+        self.assertTrue(appended[0].endswith("train 1-1"))
+        self.assertIn(("green", "1-2"), calls)
+        self.assertNotIn(("withdraw", 1), calls)
+
+    def test_a_red_train_gate_withdraws_through_merge_train(self):
+        root = self._setup(full="red")
+        calls, appended = self._fakes(root)
+        code, out = self._main("--story-id", "1-2", "--record", "--train")
+        self.assertEqual(code, 1, out)
+        self.assertIn(("withdraw", 1), calls)
+        self.assertEqual(appended, [])
+
+    def test_the_window_gate_marks_the_holder_gating_then_green(self):
+        root = self._setup(full="green")
+        calls, appended = self._fakes(root)
+        code, out = self._main("--story-id", "1-2", "--record")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([c for c in calls if c[0] == "holder"], [("holder", "gating"), ("holder", "green")])
+        self.assertIn("pre-merge gate GREEN -- run_full_suite all legs (exit 0)", appended[0])
+
+
 if __name__ == "__main__":
     unittest.main()

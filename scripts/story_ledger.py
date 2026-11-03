@@ -127,7 +127,7 @@ _TRIAGE_HEADING_RE = re.compile(r"^## triage decisions", re.MULTILINE)        # 
 _TRIAGE_LISTS = ("approved_patches", "deferred_findings", "dismissed_findings")
 # Untracked repro / property tests a review round leaves for story-finalize (adopted or deleted there);
 # they are not a half-applied patch. `config: review.repro_test_name_regex`.
-DEFAULT_REPRO_NAME = r"^(test_(?:repro|pbt)_r\d+_\d+\.py|repro_r\d+_\d+\.test\.[jt]sx?|repro-r\d+-\d+\.spec\.[jt]s)$"
+DEFAULT_REPRO_NAME = r"^(test_(?:repro|pbt)_r\d+_\d+\.py|repro_r\d+_\d+\.test\.[cm]?[jt]sx?|repro-r\d+-\d+\.spec\.[cm]?[jt]s)$"
 
 
 def repro_test_name() -> re.Pattern[str]:

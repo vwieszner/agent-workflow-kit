@@ -27,6 +27,7 @@ closeout_commit_template = "chore: [Story {story_id}] code review close-out — 
 # overwriting the worktree's own copy). Compose reads `.env` from the worktree, so without it
 # every ${VAR:-default} silently takes its default in the slot stack. [] disables seeding.
 worktree_seed_files = [".env"]
+train_prefix = "train/"            # merge-train branch = train_prefix + branch suffix (merge_train.py, land guard)
 
 [paths]
 specs_dir = "docs/implementation-artifacts"               # story specs: <specs_dir>/<story-key>.md
@@ -47,6 +48,15 @@ auto_dev_failure_log = "docs/implementation-artifacts/auto-dev-failures.md"
 # Glob for a project-context doc create-story loads as extra implementation rules.
 # "" → create-story uses "**/project-context.md"; no match is reported, not an error.
 project_context = ""
+# Optional external-owner (e.g. designer) question tracker: story_research_pack / story-spec /
+# parallel-dev-wave. "" → that section SKIPPED.
+design_questions = ""             # e.g. "docs/planning-artifacts/design-questions.md"
+design_ticket_regex = "\\b[A-Z][A-Z0-9]+-\\d+\\b"   # ticket keys in that tracker
+# rules-defer: open rows for deferred product scope no not-done story covers ("" → a defer goes to the owner).
+product_backlog = ""
+# harness-review: the ranked harness backlog and the frozen baseline it is measured against.
+harness_backlog = "docs/planning-artifacts/harness-backlog.md"
+harness_baseline = "docs/planning-artifacts/harness-baseline.md"
 
 [sprint_status]
 note_max_chars = 240
@@ -82,6 +92,11 @@ port_stride = 100                 # slot N port = base + N * port_stride
 bring_up_timeout_s = 300          # bounds the background bring-up
 ready_wait_timeout_s = 300        # wait_for_stack_ready.py default --timeout-sec
 ready_poll_s = 5
+seed_cmd = ""                      # run after a story stack's ready poll (and `bring_up_story_stack.py --mode up|seed`); "" → none
+seed_absent_regex = ""             # output regex meaning "the tree predates the seed" → outcome `absent`, not a failure
+story_env = {}                     # { VAR = "value" } every story-stack compose child gets; up/watch append missing keys to the worktree .env
+watch_ready_text = ""              # wait_for_watch_ready.py ready marker; "" → "Watch enabled"
+watch_failure_texts = []           # extra failure markers for wait_for_watch_ready.py
 
 [stack.ports]
 # Every host port mapping in the compose file MUST read one of these env vars
@@ -130,6 +145,8 @@ dependency_files = []             # e.g. ["pyproject.toml", "uv.lock", "package.
 dependency_edit_cmds = []         # e.g. ["uv add --no-sync {pkg}", "uv lock"]
 dependency_rebuild_cmd = ""       # e.g. "{compose} build backend worker && {compose} up -d"
 container_install_cmd = ""        # e.g. "{compose} exec -T frontend npm install {pkg}"
+# dependency-sync rule: command that rebuilds/publishes the base image's builder stage ("" = no builder stage).
+base_image_build_cmd = ""
 
 [tests]
 # {labels} = space-separated test labels chosen by the agent.
@@ -148,7 +165,30 @@ schema_drift_cmd = ""   # e.g. "{compose} -p {stack} exec -T backend python mana
 # Regexes run_full_suite.py / run_scoped_tests.py use to parse results.
 fail_id_regex = "^(?:FAIL|ERROR): (\\S+)"
 summary_regex = "^(?:Ran \\d+ tests?|=+ .* in [\\d.]+s)"
-full_lock_timeout_min = 60        # the gate lock is host-global; a queued run fails after this
+full_lock_timeout_min = 60        # a gate queued behind its lock (see gate_lock_scope) fails after this
+# Parser of the default scoped leg (positional labels → scoped_cmd): "regex" (fail_id_regex /
+# summary_regex) | "unittest" | "vitest" | "playwright".
+scoped_parser = "regex"
+# Extra scoped legs, selected with `run_scoped_tests.py --leg NAME=VALUE` (repeatable; {labels} = the
+# values). parser as above; strip_prefix is removed from each value; optional per-leg
+# fail_id_regex / summary_regex.
+scoped_legs = []   # e.g. [{ name = "unit", cmd = "{compose} -p {stack} exec -T frontend npx vitest --run {labels}", parser = "vitest", strip_prefix = "frontend/" }]
+# Host script-tests leg (`--scripts` / `--scripts-test`): runs on the HOST in the worktree.
+scripts_tests_dir = "scripts/tests"
+scripts_cmd = ""        # "" → "<python> -m unittest discover -s <scripts_tests_dir> -p 'test_*.py' -t ."; may use {python} {scripts_tests_dir}
+scripts_python = ""     # interpreter for that leg; "" → the interpreter running the wrapper
+scripts_env = {}        # extra env for that leg
+scripts_root = "scripts"   # subtree hashed as `scripts-tree` in a recorded --scripts run
+# Subtree the stack runs, hashed as `code-tree` in GREEN record lines (scoped --record and the
+# gate's --record). "." → the whole tree minus paths.specs_dir and .workflow/state.
+code_root = "."
+record_invariant_labels = []   # repo-invariant test labels added to the default leg of a --record run
+record_checks = []             # [{ name, cmd }] run after the legs of a --record run (lint, static checks); non-zero fails it
+sync_wait_attempts = 36        # --require-synced polls
+sync_wait_poll_s = 5
+gate_lock_scope = "stack"      # "stack" → one full gate per stack (first-come-first-served line); "host" → one per host
+preflight_wait_s = 300         # a --record gate re-runs a failing preflight for up to this long, then exits 75 (not run)
+artifact_dirs = []             # worktree-relative test-output dirs gate_campaign.py keeps per run, e.g. ["test-results"]
 
 [tests_policy]
 # Substrings every scoped/backend test invocation MUST carry (non-interactive flags, test profile).
@@ -166,6 +206,9 @@ e2e_strike_limit = 3              # failed E2E fix attempts before stopping with
 [ui]
 base_url = ""                     # base URL for UI-driven tasks (the proxy), e.g. "http://localhost:8080"
 credentials_source = ""           # where valid test credentials are defined; never guess them
+# Frontend source prefixes: story_record.py `reach` (ui-state-reach trigger). [] → reach SKIPPED.
+frontend_src_prefixes = []        # e.g. ["web/src/"]
+frontend_test_regex = "\\.(?:test|spec)\\.[jt]sx?$"   # files under those prefixes that are tests
 
 [schema]
 # Pre-production single-migration policy. true → no new migration files; edit the initial
@@ -191,6 +234,14 @@ reseed_cmds = []                  # e.g. ["{compose} -p {stack} exec -T backend 
 # ownership notes do not count). 0 = no cap.
 max_behaviour_acs = 5
 full_suite_hang_cap_min = 15      # test-bat-runner: RUNNING wall-time cap before declaring a hang
+# Land guard (story_ledger / merge_train): paths the full gate never reads. A base-branch move
+# touching only these keeps a GREEN valid; top-level *.md always counts as inert.
+gate_inert_prefixes = ["docs/", ".workflow/", ".claude/", ".opencode/"]
+gate_input_exceptions = []        # inert-by-prefix paths a build still reads (always gate inputs)
+# Generated files story-rebase regenerates instead of hand-merging when a path under trigger_prefix
+# is in the rebase's OVERLAP list: { path = "<file>", trigger_prefix = "<dir>/", cmd = "<template>" }
+generated_files = []
+comment_rule_suffixes = []        # rules-comment-discipline scope; [] = every source file
 
 [smoke]
 # Post-merge smoke on the shared stack. Services must be running; logs checked for these.
@@ -227,6 +278,57 @@ quoted_passages = []              # e.g. [{ file = ".workflow/AGENTS.local.md", 
 round2_min_patches = 5            # round-2 review fires at >= this many approved patches
 round2_min_files = 4              # ... or patches touching >= this many unique files
 required_preamble = "Report findings only — do NOT auto-apply patches — do NOT edit any files — recommend a classification per finding (patch / defer / dismiss) but the owner triages each one."
+workflow_name = "review"          # the review Workflow's name (journal facts; story_ledger rounds)
+close_out_cap = 2                 # close-out rounds after the latest branch round before the loop ends
+chunk_max_lines = 3000            # max lines per diff chunk a review layer reads
+path_rewrites = []                # [[regex, replacement]] mapping cited container paths onto repo paths, e.g. [["^/app/", "src/"]]
+ui_paths = []                     # worktree-relative UI dirs (source + UI tests) the ui-verifier's diff covers; [] → ui-verifier skipped
+ui_test_regex = "\\.(?:test|spec)\\.[cm]?[jt]sx?$"   # files under ui_paths that are tests, not UI source
+ui_profile = ""                   # repo-relative UI profile doc (see the ui-verifier agent); "" → ui-verifier skipped
+ui_base_url = ""                  # template for the story stack's UI, e.g. "http://localhost:{PROXY_PORT}"; "" → ui-verifier skipped
+ui_seed_cmd = ""                  # template run before the ui-verifier (exit 0 = seeded); "" → no seed step
+backend_source_regex = ""         # changed files test-adequacy mutates (with mutation.enabled), e.g. "^src/.+\\.py$"; "" → stage skipped
+backend_test_regex = "(^|/)tests?/|(^|/)test_[^/]*\\.py$|_test\\.py$"   # which of those are tests
+source_exclude_regex = "/(migrations|settings)/"   # never mutated
+pbt_source_regex = ""             # changed modules whose pure functions pbt-writer property-tests (Hypothesis); "" → stage skipped
+library_segments = ["node_modules", "site-packages"]   # path segments review agents may not read (third-party source)
+# Basenames of the repro / property tests the review writes (repro_paths guard, finalize adoption,
+# halt and ledger checks).
+repro_test_name_regex = "^(test_(?:repro|pbt)_r\\d+_\\d+\\.py|repro_r\\d+_\\d+\\.test\\.[cm]?[jt]sx?|repro-r\\d+-\\d+\\.spec\\.[cm]?[jt]s)$"
+repro_roots = []                  # worktree-relative dirs repro/property tests may be written in; [] → anywhere in the worktree
+repro_py_parent_dirs = ["tests", "test"]   # a Python repro test sits in one of these dirs; [] → any
+repro_runner_options = ["--project-name", "--story-id", "--tail", "--timeout", "--require-synced"]   # run_scoped_tests.py options repro/pbt writers may pass
+
+[review.mutation]
+enabled = false                   # test-adequacy (mutmut 3, Python) stage
+service = ""                      # compose service to run in ("" → host, POSIX sh; app root = the worktree)
+app_root = "/app"                 # app root inside that service
+src_prefix = ""                   # repo-relative prefix stripped to get the path under the app root, e.g. "src"
+mutmut = "mutmut"                 # mutmut executable
+pytest_args = []                  # extra pytest args
+skip_dirs = [".venv", "mutants", "node_modules", "logs", ".git"]
+timeout_s = 420
+
+[spec]
+# Tags of external owners whose questions the owner does not rule: `[OPEN-Q n] (<tag>)` markers.
+# story_record.py `rule` refuses them; story-spec drafts an interim beside them. [] → none.
+external_question_tags = []       # e.g. ["Designer"]
+
+[story_record]
+# Repo-relative dirs whose tree hash a phase-2/3 GREEN record line must carry as `<label>-tree <hash>`
+# (label: path with "/" as "-", "." as "repo"); agent_outcome blocks a completion claim whose HEAD
+# tree differs. [] disables the check.
+tested_trees = []
+
+[land]
+holder_stall_min = 180            # merge_train.py wait --holder-stall-min default
+train_gate_bound_min = 55         # wall-clock bound of one train gate child (keep below holder_stall_min)
+restart_services = []             # services restarted after a killed train gate; [] → stack.services
+restart_bound_s = 60
+health_wait_s = 263               # compose `up --wait` bound after that restart
+
+[browser]
+mcp_server = ""                   # browser MCP the ui-verifier drives (agent capability `browser`), e.g. "playwright"; "" disables
 
 [models]
 # tier → model id, per tool. Agents declare a tier; install.py renders the concrete model.
@@ -277,6 +379,21 @@ graph_query = true
 mcp_readonly = true
 script_registration = true
 agent_source_read = true
+process_kill = true               # raw kill/taskkill/Stop-Process denied; kill_owned.py calls get --since/--worktree + a token
+commit_via_bash = true            # PowerShell `git commit` denied: commit-review hooks run on Bash only
+story_write_paths = true          # story subagents write only inside their own worktree
+propagate_paths = true            # story-propagate writes only the files its dispatch lists
+land_lease_wait = true            # no owner question / stop while holding the land lease
+auto_dev_guard = true             # keep-halted guard (auto_dev_keep.py)
+agent_dispatch = true             # nested-dispatch edge allowlist + story-impl escalation
+clear_offer = true                # hold a phase dispatch once after a heavy checkpoint until /clear is offered
+clear_offer_context_tokens = 300000
+review_run_paths = true
+review_code_paths = true
+repro_paths = true
+mutation_command = true
+playwright_paths = true
+review_coverage = true
 # Commands that must never run on the host (they belong in a container), regex list.
 # Empty → the host-passive rule is prose only, not enforced.
 host_forbidden = []               # e.g. ["^npm\\b", "^node\\b"] (bare python: see env.app_runs_in_container)
@@ -294,8 +411,8 @@ command_deny = []
 recursive_delete_allowed = []
 # Subagents exempt from / subject to the "report findings only" preamble check.
 # `general-purpose` is deliberately absent: a generic dispatch falls through to prose review detection.
-non_review_agents = ["story-spec", "story-impl", "story-finalize", "story-rebase", "story-diagnose", "test-bat-runner", "dev-preflight", "trace-port-traffic", "Explore", "Plan"]
-review_agents = ["blind-hunter", "edge-case-hunter", "acceptance-auditor", "findings-verifier", "findings-evaluator"]
+non_review_agents = ["story-spec", "story-impl", "story-finalize", "story-rebase", "story-diagnose", "story-propagate", "test-bat-runner", "dev-preflight", "trace-port-traffic", "milestone-map-refresh", "repro-writer", "pbt-writer", "Explore", "Plan"]
+review_agents = ["blind-hunter", "edge-case-hunter", "verification-gap", "acceptance-auditor", "findings-verifier", "findings-evaluator", "ui-verifier", "test-adequacy"]
 # graph_query: agents that only run inside a story worktree (may not query graph.main_project).
 # The check is SKIPPED (stated once per session) until graph.main_project is set to the main
 # checkout's graph project name (the name list_projects / index_repository reports for the repo).
@@ -312,13 +429,18 @@ script_suffixes = [".py", ".ps1", ".sh"]
 # Claude Code: install.py renders one hook matcher per server here and for graph.mcp_server —
 # re-run `install.py install` after changing this list or graph.tool / graph.mcp_server.
 mcp_readonly_servers = []
+main_checkout_shared_paths = []   # repo-relative files a story subagent may still write in the main checkout
+in_place_edit_agents = ["story-impl", "story-finalize"]   # agent_source_read: `sed -i` allowed (an edit, not a read)
+review_run_paths_agents = ["blind-hunter"]
+review_code_paths_agents = ["edge-case-hunter", "verification-gap", "acceptance-auditor", "findings-verifier"]
+repro_paths_agents = ["repro-writer", "pbt-writer"]
+mutation_command_agents = ["test-adequacy"]
+review_coverage_agents = ["blind-hunter", "edge-case-hunter", "verification-gap", "acceptance-auditor", "ui-verifier", "pbt-writer", "test-adequacy"]
+# Nested dispatch allowlist: caller agent -> callees it may spawn (run_in_background must be false).
+dispatch_edges = { "story-impl" = ["story-diagnose", "dev-preflight", "Explore"], "story-finalize" = ["story-diagnose", "dev-preflight"], "story-rebase" = ["story-diagnose", "dev-preflight"], "story-diagnose" = ["dev-preflight"], "story-spec" = ["Explore"] }
+dispatch_edge_models = {}         # "caller->callee" = model the dispatch must pass, e.g. { "story-spec->Explore" = "sonnet" }
 
 [session]
-handoff_on_compact = true         # write .workflow/state/handoff.md before compaction
-# Headless agent command; {prompt} becomes the prompt as one argument.
-# "" → `claude -p {prompt}` (Claude Code) / `opencode run {prompt}` (OpenCode).
-handoff_cmd = ""
-handoff_timeout_s = 180
 # Library-docs MCP tools re-asserted after compaction/resume (fully-qualified Claude names).
 docs_mcp_tools = []               # e.g. ["mcp__context7__resolve-library-id", "mcp__context7__query-docs"]
 
@@ -334,6 +456,8 @@ agent_source_dir = ".workflow/agents"   # promoted agents (kit source format), c
 # Promoted memory. "" → the tool's native project memory dir when it has one (Claude Code),
 # otherwise ".workflow/memory" (loaded by OpenCode through opencode.json `instructions`).
 memory_dir = ""
+analyst_timeout_s = 1800          # a background analyst run is killed and logged as failed after this
+analyst_permission_mode = "auto"  # Claude Code permission mode of the headless analyst
 
 [loop]
 # Milestone whose milestone-blockers report feeds auto-dev-loop's story picker.
@@ -341,6 +465,60 @@ memory_dir = ""
 milestone = ""
 max_stories = 0                   # stories per invocation; 0 = unlimited; env AUTO_DEV_LOOP_MAX_STORIES overrides
 cleanup_paths = []                # extra repo-relative dirs auto-dev-loop may delete recursively
+# Headless tool auto_dev_driver.py launches per phase: "claude" | "opencode".
+driver_tool = "claude"
+driver_permission_mode = "auto"   # Claude Code permission mode of every driver session
+# OpenCode command template ({prompt} and {model} are filled, each one argument). Untested live.
+opencode_cmd = "opencode run {prompt}"
+orchestrator_model = "opus"       # default --orchestrator-model
+orchestrator_effort = "medium"    # default --orchestrator-effort: low|medium|high|xhigh|max
+session_timeout_min = 300         # default --session-timeout-min (per phase session; watchdog bound)
+land_stall_min = 180              # default --land-stall-min (lease holder stall budget)
+# The driver kills a session whose init event lacks any of these (claude only).
+required_tools = ["Bash", "Agent", "Skill", "Workflow"]
+required_agents = ["story-spec", "story-impl", "findings-evaluator", "findings-verifier", "story-finalize", "story-rebase"]
+extra_harness_globs = []          # extra [dir, glob] pairs hashed into the driver's harness fingerprint
+
+[transcripts]
+claude_root = "~/.claude/projects"   # root of Claude Code's per-project transcript dirs
+# Globs (under claude_root) of this project's transcript dirs. [] → "<slug of repo root>*" and
+# "<slug of git.worktrees_root>*" (slug = path with every non-alphanumeric char replaced by "-").
+claude_project_globs = []
+replay_refused = ["phase_dispatch", "repro_paths"]   # hook modules transcript_calls.py replay refuses
+
+[agents]
+# Effort-variant agents count as their base role: <role><suffix> → <role>.
+escalated_roles = ["story-impl"]
+effort_variant_suffixes = ["-xhigh", "-max"]
+
+[cost]
+prices = {}                       # model id → [in, out, cache_read, cache_write_5m, cache_write_1h] $/MTok overrides
+mean_output_tokens = {}           # "main:<model>" / "sub:<model>" → tokens, for requests without a final usage line
+
+[harness_metrics]
+agent_phase = {}                  # extra/override name → phase maps for per-story cost attribution
+skill_phase = {}
+command_phase = {}
+
+[path_rules]
+# Path-scoped rule files (Claude Code `.claude/rules/*.md` with `paths:` frontmatter) injected into
+# story agents working in slot worktrees. install.py registers one SubagentStart command per name.
+dir = ".claude/rules"
+names = []
+agents = "^story-(impl|impl-xhigh|impl-max|finalize|rebase)$"   # SubagentStart matcher
+
+[context_cap]
+tokens = 300000                   # soft context cap after which context_cap.py tells an agent to hand off
+
+[static_checks]
+# One table per tool (see .workflow/scripts/static_checks.py). [] → static checks SKIPPED.
+# [[static_checks.tools]]
+# name = "pyright"
+# cmd = ["pyright", "--outputjson"]
+# suffixes = [".py"]
+# format = "pyright-json"         # pyright-json | eslint-json | exit-code
+# blocking_rules = ["reportUndefinedVariable", "reportMissingImports"]
+tools = []
 
 [milestones]
 # One sub-table per milestone; the dependency-map schema is in the milestone-blockers skill.
@@ -349,3 +527,5 @@ cleanup_paths = []                # extra repo-relative dirs auto-dev-loop may d
 # map_key = "release-1.dependency_map"     # default "<name>.dependency_map"
 # member_marker = "\\[R1\\]"               # regex on sprint-status row notes; "" skips the coverage check
 # priority_markers = ["BLOCKING-T1", "BLOCKING-T2"]   # ranks group-0 candidates; [] → map order
+# non_member_marker = "NOT R1"    # regex: row explicitly outside the milestone (map refresh check)
+# untriaged_marker = "UNPHASED"   # regex: row waiting for triage (map refresh check)

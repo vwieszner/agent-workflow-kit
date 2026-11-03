@@ -90,7 +90,8 @@ non-enforcement means it was never wired up. Full rule: `.workflow/rules/no-qual
 
 **Root cause before fix (HARD RULE).** No fix until the mechanism is demonstrated: *this input → this
 code path → this wrong state → this observed failure*. No unproved fix, no test-weakening, no silent
-deferral, no symptom suppression. Mitigations ship only when labelled in the code comment and commit
+deferral, no symptom suppression (swallowed exceptions, sleeps, bumped timeouts — except a per-test
+timeout raise meeting `.workflow/rules/parallel-test-isolation.md` "Per-test timeouts"). Mitigations ship only when labelled in the code comment and commit
 message, with the investigation written down and the owner's agreement. If you cannot prove it, say so
 and ask. Full rule: `.workflow/rules/root-cause-before-fix.md`.
 
@@ -118,7 +119,8 @@ ones (unused code, commented-out blocks, TODOs, "removed in vN" markers, inconsi
 mention them in your report. Test before saving: can each changed line point to the request or an
 AC? If not, revert it. "It was already wrong", "I was already there" and "it's a quick fix" are not
 justifications. Exceptions: explicit cleanup/refactor tasks, mechanical renames/moves,
-formatter output.
+formatter output. **Work already built off-task is not reverted:** it moves onto its own branch with a
+carved story, and the assigned task resumes. Full rule: `.workflow/rules/off-task-work.md`.
 
 ## Truthfulness
 
@@ -154,6 +156,9 @@ Plans, specs, sprint status, epics, audits, and these rules are the record.
    tell the owner what was updated — never just acknowledge in chat.
    Make all of one decision's edits in a single pass — one write per file, or all the edits issued
    together in one message — never one edit per turn.
+   **Shared index.** Other sessions' uncommitted edits sit in the same record files: commit only your
+   own hunks (`.workflow/scripts/stage_own_hunks.py list`, then `gate` + `git commit` + `verify`);
+   never `git add` a whole record file and never `git commit --only`.
 2. **Ambiguity/contradiction.** If a doc is ambiguous or contradicts another, stop, ask the owner,
    and propagate the answer — never paper over it with a guess. Subagents surface divergences to the orchestrator; they never auto-resolve.
 3. **In-flight spec changes.** (a) When a story's spec changes during implementation, capture it in the
@@ -207,7 +212,21 @@ subagent (report-only; it never runs compose commands). The script is the gate, 
 
 **Polling heartbeat.** Every wait loop emits a timestamped line per iteration and has an explicit
 timeout: `until <check>; do echo "[$(date +%H:%M:%S)] still waiting on <thing>..."; sleep N; done`.
-If a tool failure is suspected, surface diagnosis options within 30 seconds.
+If a tool failure is suspected, surface diagnosis options within 30 seconds. Never put a foreground
+`sleep N` before another command in one call; wait with a background monitor on an until-loop, with one
+until-loop call carrying its heartbeat and an end bound under the tool's timeout cap
+(`end=$((SECONDS+540))`), or with a background run and its completion notification.
+
+**Process kills (HARD RULE).** Never `kill` / `pkill` / `taskkill` / `Stop-Process`. List processes
+with `.workflow/scripts/proc_scan.py`; stop your own with `.workflow/scripts/kill_owned.py --pid <n>
+[--tree]` (a main session adds `--worktree <story worktree>`). A REFUSE line is final — ask the owner.
+Hook-enforced: `.workflow/hooks/guards/process_kill.py`.
+
+**Commits go through the Bash tool** (when `config: guards.commit_via_bash`): the commit guards run on
+Bash only, so a PowerShell `git commit` is denied.
+
+**Compose watch started by hand:** run `.workflow/scripts/wait_for_watch_ready.py <output file>`
+before preflight.
 
 **Code-symbol navigation (HARD RULE when `config: graph.tool` is not `"none"`).** Use the code-graph
 MCP (`config: graph.mcp_server`) for symbol lookup, call chains, change impact, and exact symbol
@@ -223,6 +242,10 @@ editing it. **In a story slot, query only the slot's graph project** (from
   `.workflow/scripts/run_scoped_tests.py`, the full gate via `.workflow/scripts/run_full_suite.py`,
   required flags (`config: tests_policy.required_flags`), no real/paid LLM in tests (use the mock
   provider).
+- **Scoped runs:** one `run_scoped_tests.py` invocation per round, carrying every leg the story
+  touches; `--record <id> <phase>` makes the green run write its own GREEN line — never hand-write one.
+- **Full gate:** one per stack at a time (`config: tests.gate_lock_scope`); a queued run is waiting
+  in line, not hung. Exit 75 from a `--record` gate means it ran no test.
 - **Real-signature tests at infra boundaries (HARD RULE).** Code talking to a real dependency has a
   live-dependency test or a contract-faithful fake; a bare auto-mock for that boundary is forbidden.
   Full rule: `.workflow/rules/real-signature-tests.md`.
@@ -230,8 +253,11 @@ editing it. **In a story slot, query only the slot's graph project** (from
   singletons, no cross-test module state; shared live infra keyed on per-test tokens; per-worker E2E
   shards. Full rule: `.workflow/rules/parallel-test-isolation.md`.
 - **Pre-merge full gate.** Scoped green cannot catch parallel-isolation regressions. Run the full gate
-  before merging when the change touches shared infra, adds a connection-holding singleton, touches
-  seed/E2E worker plumbing, or ends a wave. When in doubt, run it. A failing leg on a story branch
+  before merging when the change touches shared infra (settings, app startup, fork handlers, test
+  fixtures, worker/server/queue config), adds a connection-holding singleton or module-level client,
+  touches seed or E2E worker/shard plumbing, or ends a wave. A feature story touching only its own
+  module and tests needs scoped green plus the post-merge smoke; parallel-dev-wave records that
+  exemption as `pre-merge gate not required — <this clause>`. When in doubt, run it. A failing leg on a story branch
   goes to the `story-diagnose` subagent, never to `story-finalize` or `story-impl`.
 - **Batch-fix iteration.** Capture the failure list once, fix all, validate once per round; ask the
   owner when a failure needs judgment. Dispatch prompts must not ask for per-fix test runs
@@ -241,6 +267,8 @@ editing it. **In a story slot, query only the slot's graph project** (from
   marker. E2E runs have runner retries disabled — a retry hides the failure.
 - **E2E and browser work:** `.workflow/rules/e2e-debugging-protocol.md`,
   `.workflow/rules/browser-interaction.md`.
+- **Path rules.** Path-scoped rule files (`config: path_rules.dir`) load only for files under the
+  project root; story agents working in slot worktrees get `config: path_rules.names` injected at start.
 
 ## Story pipeline
 
@@ -252,7 +280,27 @@ review patches; merging without the owner's explicit confirmation; skipping the 
 (`config: paths.slot_registry`); skipping branch/worktree/stack cleanup.
 
 **Isolated slot per story.** Slots `1..config: slots.count`; slot `config: slots.shared_slot` is the
-shared dev stack and is never assigned.
+shared dev stack and is never assigned. Story subagents write only inside their own worktree, never
+the main checkout (`.workflow/hooks/guards/story_write_paths.py`). `story-impl-xhigh` / `story-impl-max`
+are picked by the hand-off file's `rounds_used` (`.workflow/hooks/guards/agent_dispatch.py`).
+
+**Code review** runs only through the `layered-review` skill: it stages the round with
+`review_stage.py`, runs the `review` workflow (the Workflow tool, or `workflow_replay.mjs` where there
+is none) and renders the round with `review_findings_render.py`. Nobody writes a findings section by
+hand; a layer without a report, an UNVERIFIED finding or an unchecked UI state is never presented as
+clean. Patch by default; defer only when the fix needs scope outside the story or a design or spec
+decision — named and tracked (`rules-defer`). Read a finding with `review_findings_show.py <file> <id>`,
+never the whole findings file.
+
+**Land window.** Merges go one at a time under the land lease (`land_lease.py`); while a story waits
+in the lease's line its train branch is gated (`merge_train.py`). Never wait on the owner while
+holding the lease: a question to the owner releases it first (`land_lease.py release <id>`).
+
+**Autonomous loop.** `auto-dev-loop` (driven one phase per session by
+`.workflow/scripts/auto_dev_driver.py`, observed with `auto-dev-run`) runs without human gates under
+its own pre-authorized list. A halted story keeps its branch, worktree and stack; only the owner
+resumes it (`resume_halted.py <id> --ruling '…'`) or discards it (`cleanup_story_stack.py <id>`). In an
+auto-dev session the `auto_dev_keep` guard denies removing a story's worktree, branch or volumes.
 
 **Post-merge regression gate.** After every merge, invoke the `post-merge-smoke` skill. Every service
 in `config: smoke.services` must be running with no fresh errors. Pre-existing baseline failures are
@@ -299,3 +347,6 @@ tests, reset stale databases after merge. Full rule: `.workflow/rules/preprod-sc
   skill; only the `curate` skill, with the owner's per-item approval, moves a proposal into a skill,
   agent, rule, script, or memory. Nothing auto-writes into those locations.
   Full rule: `.workflow/rules/script-artifact-curation.md`.
+- **Harness readers.** Past tool calls, journal commands and prior subagent reports are looked up with
+  `transcript_calls.py`, `journal_grep.py` and `retro_digest.py`, never raw greps over transcripts or
+  whole journal reads. Full rule: `.workflow/rules/use-harness-readers.md`.

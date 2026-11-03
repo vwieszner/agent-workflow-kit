@@ -17,8 +17,8 @@ Usage:
   skills   → .claude/skills (claude|both — OpenCode reads .claude/skills too)
              .opencode/skills (opencode only)
   agents   → rendered into .claude/agents and/or .opencode/agents
-  workflows→ .claude/workflows (claude|both; Claude Code Workflow scripts — OpenCode runs the
-             same stages through the skill's sequential fallback)
+  workflows→ .workflow/workflows (always; node replay fallback) and .claude/workflows
+             (claude|both; the Claude Code Workflow tool)
   hooks    → .claude/settings.json hooks + permissions.deny merged (claude|both); the MCP
              guard matchers are rendered from graph.mcp_server / guards.mcp_readonly_servers
              .opencode/plugins/*.ts + .opencode/package.json deps (opencode|both)
@@ -47,7 +47,7 @@ IGNORE_NAMES = ("__pycache__", "*.pyc", ".DS_Store")
 IGNORE = shutil.ignore_patterns(*IGNORE_NAMES)
 MANIFEST = ".workflow/.kit-manifest.json"
 # Kit-owned hook scripts whose Claude matchers install.py renders from config.
-MCP_GUARDS = ("graph_query.py", "mcp_readonly.py")
+MCP_GUARDS = ("graph_query.py", "mcp_readonly.py", "playwright_paths.py")
 # Always-loaded instruction files (OpenCode `instructions`, Claude CLAUDE.md @imports).
 INSTRUCTION_FILES = [".workflow/AGENTS.md", ".workflow/AGENTS.local.md"]
 LOCAL_FILES = {
@@ -97,6 +97,27 @@ def _cfg(wf, key: str, default: Any) -> Any:
 
 # ------------------------------------------------------------------ frontmatter
 
+def _split_top(inner: str) -> list[str]:
+    """Split an inline list/map body on the commas outside nested [] / {} and quotes."""
+    parts, depth, quote, cur = [], 0, "", []
+    for ch in inner:
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    parts.append("".join(cur))
+    return [x for x in parts if x.strip()]
+
+
 def _scalar(raw: str) -> Any:
     raw = raw.strip()
     if not raw:
@@ -106,11 +127,11 @@ def _scalar(raw: str) -> Any:
         return json.loads(raw) if raw[0] == '"' else body.replace("''", "'")
     if raw.startswith("[") and raw.endswith("]"):
         inner = raw[1:-1].strip()
-        return [_scalar(x) for x in inner.split(",")] if inner else []
+        return [_scalar(x) for x in _split_top(inner)] if inner else []
     if raw.startswith("{") and raw.endswith("}"):
         out: dict[str, Any] = {}
         inner = raw[1:-1].strip()
-        for pair in filter(None, (p.strip() for p in inner.split(","))):
+        for pair in filter(None, (p.strip() for p in _split_top(inner))):
             k, _, v = pair.partition(":")
             out[k.strip().strip("\"'")] = _scalar(v)
         return out
@@ -136,16 +157,25 @@ def parse_agent(text: str) -> tuple[dict[str, Any], str]:
     except StopIteration:
         raise ValueError("missing frontmatter closing '---'") from None
     meta: dict[str, Any] = {}
+    raw_blocks: dict[str, list[str]] = {}
     current: str | None = None
+    child_indent: int | None = None
     for line in lines[1:end]:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         if line[0] in " \t" and current is not None:
+            raw_blocks.setdefault(current, []).append(line)
+            indent = len(line) - len(line.lstrip())
+            if child_indent is None:
+                child_indent = indent
+            if indent > child_indent:
+                continue   # deeper YAML (e.g. agent hooks): kept raw, rendered verbatim
             k, _, v = line.strip().partition(":")
             if not isinstance(meta.get(current), dict):
                 meta[current] = {}
-            meta[current][k.strip().strip("\"'")] = _scalar(v)
+            meta[current][k.strip().strip("\"'")] = _scalar(v) if v.strip() else {}
             continue
+        child_indent = None
         k, _, v = line.partition(":")
         k = k.strip()
         if v.strip() == "":
@@ -154,6 +184,8 @@ def parse_agent(text: str) -> tuple[dict[str, Any], str]:
         else:
             meta[k] = _scalar(v)
             current = None
+    if raw_blocks:
+        meta["__raw__"] = raw_blocks
     body = "\n".join(lines[end + 1:]).lstrip("\n")
     return meta, body
 
@@ -178,7 +210,7 @@ def render_agent(src: Path, tool: str, wf) -> str:
         if req not in meta:
             raise ValueError(f"{src.name}: frontmatter lacks '{req}'")
     caps = [str(c) for c in (meta.get("tools") or [])]
-    unknown = set(caps) - set(CLAUDE_TOOLS) - {"graph", "docs"}
+    unknown = set(caps) - set(CLAUDE_TOOLS) - {"graph", "docs", "browser"}
     if unknown:
         raise ValueError(f"{src.name}: unknown capabilities {sorted(unknown)}")
     readonly = bool(meta.get("readonly", False))
@@ -189,6 +221,8 @@ def render_agent(src: Path, tool: str, wf) -> str:
     graph_srv = str(_cfg(wf, "graph.mcp_server", "codebase-memory-mcp"))
     docs_srv = str(_cfg(wf, "docs.mcp_server", "") or "")
     docs_on = "docs" in caps and bool(docs_srv)
+    browser_srv = str(_cfg(wf, "browser.mcp_server", "") or "")
+    browser_on = "browser" in caps and bool(browser_srv)
 
     out = ["---"]
     if tool == "claude":
@@ -201,6 +235,8 @@ def render_agent(src: Path, tool: str, wf) -> str:
             names += ["ToolSearch", f"mcp__{graph_srv}"]
         if docs_on:
             names += ["ToolSearch", f"mcp__{docs_srv}"]
+        if browser_on:
+            names += ["ToolSearch", f"mcp__{browser_srv}"]
         names = list(dict.fromkeys(names))
         if not names:
             raise ValueError(f"{src.name}: renders to an empty Claude tool list "
@@ -214,8 +250,13 @@ def render_agent(src: Path, tool: str, wf) -> str:
         mode = str(_cfg(wf, "models.claude_permission_mode", "") or "")
         if mode and "permissionMode" not in overrides:
             out.append(f"permissionMode: {mode}")
-        for k, v in overrides.items():
-            out.append(f"{k}: {v if not isinstance(v, str) else v}")
+        raw = (meta.get("__raw__") or {}).get("claude")
+        if raw:   # block form: passed through verbatim (nested YAML such as agent hooks)
+            cut = min(len(x) - len(x.lstrip()) for x in raw)
+            out += [x[cut:] for x in raw]
+        else:
+            for k, v in overrides.items():
+                out.append(f"{k}: {v if isinstance(v, str) else _y(v)}")
     elif tool == "opencode":
         def perm(on: bool) -> str:
             return "allow" if on else "deny"
@@ -237,6 +278,8 @@ def render_agent(src: Path, tool: str, wf) -> str:
                 f"  {_y(graph_srv + '*')}: {str(graph_on).lower()}"]
         if docs_srv:
             out.append(f"  {_y(docs_srv + '*')}: {str(docs_on).lower()}")
+        if browser_srv:
+            out.append(f"  {_y(browser_srv + '*')}: {str(browser_on).lower()}")
         for k, v in (meta.get("opencode") or {}).items():
             out.append(f"{k}: {v}")
     else:
@@ -339,6 +382,11 @@ def _is_kit_mcp_hook(h: dict) -> bool:
     return "/.workflow/hooks/guards/" in cmd and cmd.rstrip('"').endswith(MCP_GUARDS)
 
 
+def _is_kit_command(h: dict) -> bool:
+    cmd = str(h.get("command", ""))
+    return "/.workflow/hooks/" in cmd or "/.workflow/scripts/" in cmd
+
+
 def _merge_claude_settings(cur: dict, patch: dict) -> dict:
     """Hooks: append each entry whose command is not already wired for that event+matcher;
     refresh the fields of kit-owned entries already wired; replace the kit's MCP guard
@@ -355,6 +403,16 @@ def _merge_claude_settings(cur: dict, patch: dict) -> dict:
             elif not grp.get("hooks"):
                 kept.append(grp)
         hooks["PreToolUse"] = kept
+    wanted = {str(h.get("command")) for groups in patch.get("hooks", {}).values()
+              for grp in groups for h in grp.get("hooks", [])}
+    for event in list(hooks):
+        kept = []
+        for grp in hooks[event]:
+            rest = [h for h in grp.get("hooks", [])
+                    if not (_is_kit_command(h) and str(h.get("command")) not in wanted)]
+            if rest or not grp.get("hooks"):
+                kept.append(dict(grp, hooks=rest))
+        hooks[event] = kept
     for event, groups in patch.get("hooks", {}).items():
         existing = list(hooks.get(event, []))
         for grp in groups:
@@ -367,7 +425,7 @@ def _merge_claude_settings(cur: dict, patch: dict) -> dict:
                 have = by_cmd.get(h.get("command"))
                 if have is None:
                     match["hooks"] = match.get("hooks", []) + [h]
-                elif "/.workflow/hooks/" in str(h.get("command", "")):
+                elif _is_kit_command(h):
                     have.update(h)
         hooks[event] = existing
     out["hooks"] = hooks
@@ -396,10 +454,21 @@ def _render_claude_fragment(frag: dict, wf) -> dict:
         srv = str((entry or {}).get("server", "")) if isinstance(entry, dict) else ""
         if srv:
             servers.setdefault(srv, []).append("mcp_readonly.py")
+    browser = str(_cfg(wf, "browser.mcp_server", "") or "")
+    if browser:
+        servers.setdefault(browser, []).append("playwright_paths.py")
     groups = out.setdefault("hooks", {}).setdefault("PreToolUse", [])
     for srv, scripts in servers.items():
         groups.append({"matcher": f"mcp__{srv}__.*",
-                       "hooks": [{"type": "command", "command": cmd.format(s)} for s in scripts]})
+                       "hooks": [{"type": "command", "command": cmd.format(s), "timeout": 30}
+                                 for s in scripts]})
+    # Path-scoped rules injected into story agents at start (one command per rule name).
+    names = [str(n) for n in (_cfg(wf, "path_rules.names", []) or []) if str(n)]
+    if names:
+        rule = 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/inject_path_rules.py" {}'
+        out["hooks"].setdefault("SubagentStart", []).insert(0, {
+            "matcher": str(_cfg(wf, "path_rules.agents", "^story-(impl|impl-xhigh|impl-max|finalize|rebase)$")),
+            "hooks": [{"type": "command", "command": rule.format(n), "timeout": 15} for n in names]})
     return out
 
 
@@ -475,7 +544,9 @@ def install(target: Path, tool: str, force: bool, dry: bool) -> int:
                 ins.write(t / d / ag.name, render_agent(ag, tl, wf), owned=False)
                 ins.kit_files.add(f"{d}/{ag.name}")
 
-    # 4b. Claude Code workflow scripts
+    # 4b. Workflow scripts: always under .workflow/workflows (the replay fallback runs them with
+    # node), and for Claude Code also under .claude/workflows (the Workflow tool).
+    ins.copytree(KIT / "workflows", wfd / "workflows")
     if use_claude and (KIT / "workflows").is_dir():
         for wfs in sorted((KIT / "workflows").glob("*.js")):
             ins.write(t / ".claude" / "workflows" / wfs.name,

@@ -16,7 +16,7 @@ quote, redirection or substitution (tokens match `[\\w./:=@,+-]`), so no shell w
 Write / Edit: allowed only when the target
   * lies in a git worktree root directly under `config: git.worktrees_root` (`git rev-parse --show-toplevel`
     equals it: a plain folder there tracks nothing, so the untracked check alone would pass every path);
-  * has a repro test name (`config: review.repro_name_regex`, matched exact-case on the file name);
+  * has a repro test name (`config: review.repro_test_name_regex`, matched exact-case on the file name);
   * lies under one of `config: review.repro_roots` (worktree-relative; [] = anywhere in the worktree);
   * for a `.py` file, sits in a directory named in `config: review.repro_py_parent_dirs` ([] = any);
   * is not tracked in that worktree (`git ls-files --error-unmatch`, case-sensitive).
@@ -83,8 +83,8 @@ def write_check(raw: str) -> str | None:
     worktree = str(Path(wt_root) / parts[0])
     inner = "/".join(parts[1:])
     name = parts[-1]
-    if not re.search(str(g.cfg("review.repro_name_regex", REPRO_NAME_DEFAULT)), name):
-        return (f"{name!r} is not a repro test name (config review.repro_name_regex: test_repro_r<round>_<n>.py, "
+    if not re.search(str(g.cfg("review.repro_test_name_regex", REPRO_NAME_DEFAULT)), name):
+        return (f"{name!r} is not a repro test name (config review.repro_test_name_regex: test_repro_r<round>_<n>.py, "
                 f"test_pbt_r<round>_<n>.py, repro_r<round>_<n>.test.<ext>, repro-r<round>-<n>.spec.<ext>)")
     roots = [str(r).strip("/") for r in g.cfg_list("review.repro_roots", []) if str(r).strip("/")]
     if roots and not any(inner == r or inner.startswith(r + "/") for r in roots):

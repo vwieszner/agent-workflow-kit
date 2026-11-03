@@ -6,7 +6,14 @@ tier: standard
 effort: max
 tools: [read, grep, glob, edit, write, bash, task, skill, graph, monitor]
 readonly: false
-claude: {maxTurns: 770, skills: [rules-graph-nav, rules-comment-discipline, rules-test-runs, rules-bar-impact]}
+claude:
+  maxTurns: 770
+  skills: [rules-graph-nav, rules-comment-discipline, rules-test-runs, rules-bar-impact]
+  hooks:
+    Stop:
+      - hooks:
+          - type: command
+            command: 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/agent_outcome.py" --role finalize'
 ---
 
 # Story Finalize Agent

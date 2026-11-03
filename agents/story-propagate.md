@@ -6,7 +6,13 @@ tier: standard
 effort: high
 tools: [read, grep, glob, edit, write, bash, graph]
 readonly: false
-claude: {maxTurns: 210}
+claude:
+  maxTurns: 210
+  hooks:
+    Stop:
+      - hooks:
+          - type: command
+            command: 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/agent_outcome.py" --role propagate'
 ---
 
 # Story Propagate

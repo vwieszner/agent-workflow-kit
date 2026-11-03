@@ -30,7 +30,8 @@ def transcript_file(payload: dict) -> str | None:
         return None
     path = Path(tp)
     project = next((a.parent for a in path.parents if a.name == sid), path.parent)
-    hits = glob.glob(os.path.join(project, sid, "subagents", "**", f"agent-{aid}.jsonl"), recursive=True)
+    hits = glob.glob(os.path.join(glob.escape(str(project)), sid, "subagents", "**", f"agent-{aid}.jsonl"),
+                     recursive=True)
     return hits[0] if hits else None
 
 

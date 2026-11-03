@@ -6,7 +6,18 @@ tier: standard
 effort: xhigh
 tools: [read, grep, glob, edit, write, bash, task, skill, graph, docs, monitor]
 readonly: false
-claude: {maxTurns: 1450, skills: [rules-graph-nav, rules-comment-discipline, rules-test-runs]}
+claude:
+  maxTurns: 1450
+  skills: [rules-graph-nav, rules-comment-discipline, rules-test-runs]
+  hooks:
+    Stop:
+      - hooks:
+          - type: command
+            command: 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/agent_outcome.py" --role impl'
+    PostToolUse:
+      - hooks:
+          - type: command
+            command: 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/context_cap.py" --role impl'
 ---
 
 # Story Implementation Agent

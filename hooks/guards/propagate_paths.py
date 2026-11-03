@@ -37,7 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _guardlib as g  # noqa: E402
-from _agent_transcript import dispatch_prompt, transcript_file  # noqa: E402
+from _transcript import dispatch_prompt, transcript_file  # noqa: E402
 from agent_roles import base_role  # noqa: E402
 
 # Shell operators, substitution, escapes, and brace/glob expansion (bash expands them

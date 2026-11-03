@@ -97,12 +97,33 @@ class InstallTests(unittest.TestCase):
 
     def test_hook_fields_refreshed_for_existing_install(self):
         (self.t / ".claude").mkdir()
-        cmd = 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/write_handoff.py" --tool claude'
-        (self.t / ".claude" / "settings.json").write_text(json.dumps({"hooks": {"PreCompact": [
-            {"matcher": "auto", "hooks": [{"type": "command", "command": cmd}]}]}}), encoding="utf-8")
+        cmd = 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/session_start.py" startup'
+        stale = 'uv run --no-project "$CLAUDE_PROJECT_DIR/.workflow/hooks/session/write_handoff.py" --tool claude'
+        mine = "echo project-owned"
+        (self.t / ".claude" / "settings.json").write_text(json.dumps({"hooks": {
+            "SessionStart": [{"matcher": "startup", "hooks": [{"type": "command", "command": cmd}]}],
+            "PreCompact": [{"matcher": "auto", "hooks": [{"type": "command", "command": stale},
+                                                         {"type": "command", "command": mine}]}]}}),
+            encoding="utf-8")
         self.run_install()
-        entry = self.settings()["hooks"]["PreCompact"][0]["hooks"][0]
-        self.assertEqual(200, entry.get("timeout"))
+        hooks = self.settings()["hooks"]
+        entry = hooks["SessionStart"][0]["hooks"][0]
+        self.assertEqual(90, entry.get("timeout"))
+        pre = [h["command"] for g in hooks["PreCompact"] for h in g["hooks"]]
+        self.assertNotIn(stale, pre)          # kit entry the kit no longer ships is dropped
+        self.assertIn(mine, pre)              # the project's own entry is kept
+
+    def test_claude_block_passthrough_and_inline_lists(self):
+        src = self.t / "a.md"
+        src.write_text("---\nname: a\ndescription: d\ntools: [read]\n"
+                       "claude:\n  maxTurns: 5\n  skills: [x, y]\n  hooks:\n    Stop:\n"
+                       "      - hooks:\n          - type: command\n            command: 'run --role z'\n"
+                       "---\nbody\n", encoding="utf-8")
+        out = install.render_agent(src, "claude", install._load_wfconfig(None))
+        self.assertIn("skills: [x, y]\n", out)
+        self.assertIn("hooks:\n  Stop:\n    - hooks:\n        - type: command\n", out)
+        meta, _ = install.parse_agent("---\nname: a\nclaude: {maxTurns: 3, skills: [p, q]}\n---\n")
+        self.assertEqual(meta["claude"], {"maxTurns": 3, "skills": ["p", "q"]})
 
     def test_render_claude_fragment_unit(self):
         class WF:

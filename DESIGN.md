@@ -38,6 +38,7 @@ agent-workflow-kit/
   scripts/*.py                  pipeline helper scripts (stdlib-only, read the config)
   scripts/wfconfig.py           the ONLY config loader — every script/hook imports it
   scripts/INDEX.md              registry of the kit scripts
+  workflows/*.js                Claude Code Workflow scripts (the review pipeline); replayed elsewhere
   vendor/bmad/                  vendored BMad pieces the pipeline calls, packaged as skills
   adapters/opencode/            plugin (.ts) + opencode.json fragment
   adapters/claude/              settings.json hooks fragment
@@ -52,12 +53,13 @@ agent-workflow-kit/
 |---|---|
 | `scripts/`, `hooks/` | `.workflow/scripts/`, `.workflow/hooks/` |
 | `workflow.config.example.toml` | `.workflow/config.toml` (only if absent) |
-| runtime state (journal, proposals, handoff, story-setup, locks) | `.workflow/state/` (git-ignored) |
+| runtime state (journal, proposals, story-setup, locks, land lease, auto-dev runs) | `.workflow/state/` (git-ignored) |
 | `rules/` | `.workflow/rules/` |
 | `AGENTS.md` | `.workflow/AGENTS.md`, listed in `opencode.json` `instructions` and/or `@`-imported from `CLAUDE.md` |
 | — (project-owned, created once, never overwritten) | `.workflow/AGENTS.local.md`, `.workflow/rules/local/INDEX.md` — `curate` promotes rules here |
 | `skills/<n>/`, `vendor/bmad/skills/<n>/` | `.claude/skills/<n>/` for `claude`/`both` (OpenCode reads it too), `.opencode/skills/<n>/` for `opencode` |
 | `agents/<n>.md` | rendered to `.opencode/agents/<n>.md` and/or `.claude/agents/<n>.md` |
+| `workflows/<n>.js` | `.workflow/workflows/<n>.js` (always; `node .workflow/scripts/workflow_replay.mjs` runs it where no Workflow tool exists — needs Node ≥ 18) and `.claude/workflows/<n>.js` (claude/both) |
 | `adapters/opencode/plugins/*.ts` | `.opencode/plugins/` |
 | `adapters/claude/settings.hooks.json` | merged into `.claude/settings.json` |
 
@@ -123,6 +125,7 @@ Capability vocabulary for `tools` and its rendering:
 | web | WebFetch, WebSearch | `permission.webfetch` / `.websearch: allow` |
 | graph | `mcp__<config: graph.mcp_server>` + ToolSearch | `tools: {"<server>*": true}` (legacy tools map; the only MCP gate) |
 | docs | `mcp__<config: docs.mcp_server>` + ToolSearch | `tools: {"<server>*": true}` |
+| browser | `mcp__<config: browser.mcp_server>` + ToolSearch | `tools: {"<server>*": true}` |
 | monitor | Monitor, TaskStop, SendMessage | (no equivalent — omitted) |
 
 `readonly: true` removes the edit/write capabilities at render time. It does not restrict `bash`:
@@ -130,7 +133,9 @@ an agent that is readonly and keeps `bash` (e.g. `dev-preflight`, `story-diagnos
 no-mutation by its own prose — its hard rules forbid lifecycle and git-state commands.
 
 Optional per-tool overrides in the source frontmatter: `claude: {permissionMode: auto}` and
-`opencode: {temperature: 0.1}` are passed through verbatim.
+`opencode: {temperature: 0.1}` are passed through. An indented `claude:` block is copied verbatim
+into the Claude frontmatter, so it may hold nested YAML (agent-scoped `hooks:`, `skills:` lists);
+inline lists and maps split on top-level commas only.
 `install.py render-agent <file> --tool claude|opencode` performs the rendering.
 
 ## 6. Tool-neutral prose conventions
@@ -157,7 +162,8 @@ All hook logic is Python, written against the **Claude Code hook protocol**: JSO
 The OpenCode plugin (`adapters/opencode/plugins/workflow-hooks.ts`) adapts OpenCode events
 to that protocol: it builds the Claude-shaped payload (tool name mapping `bash→Bash`,
 `task→Agent`, `skill→Skill`, `write→Write`, `edit→Edit`, `<server>_<tool>→mcp__<server>__<tool>`),
-spawns the same Python script, and throws an `Error(reason)` on a deny. Session hooks map to
+spawns the same Python script, and throws an `Error(reason)` on a deny. A guard's
+`hookSpecificOutput.updatedInput` replaces the tool args (the shell command) before the call runs. Session hooks map to
 `event` (`session.created`, `session.idle`, `session.compacted`) and
 `experimental.session.compacting`. Where OpenCode has no transcript file, the plugin writes
 the journal entries itself in the journal format (§8).
@@ -173,7 +179,6 @@ Guards are **fail-open on internal error** (a crashing guard must not brick the 
   `<session_id>.sub-<agent>.jsonl`.
 - Proposals: `.workflow/state/proposals/<kind>-<slug>.md` (kind ∈ skill|agent|rule|script|memory),
   with the draft beside it as `<kind>-<slug>.draft.<ext>`.
-- Handoff: `.workflow/state/handoff.md`.
 - Story setup: `.workflow/state/story-setup/<stack>.{json,log,graph_project}`.
 - Locks: `.workflow/state/locks/`.
 - Slot registry / sprint status / specs: tracked docs at `config: paths.*` (committed).

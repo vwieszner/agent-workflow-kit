@@ -737,6 +737,38 @@ def _preflight_not_run(story_id: str, rc: int) -> int:
 
 # --------------------------------------------------------------------------- locked actions
 
+def _merge_train():
+    """The merge_train module when the kit ships it, else None (train steps are then skipped)."""
+    try:
+        import merge_train  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return merge_train
+
+
+def _withdraw_train(story_id: str, rc: int, head: str | None) -> None:
+    """A red train gate: withdraw the checkpoint-3 approval and remove the story from the line."""
+    mt, ll = _merge_train(), _land_lease()
+    try:
+        mt.withdraw(story_id, rc, head, ll.default_path())
+    except (mt.TrainError, ll.LeaseError, OSError) as exc:
+        print(f"WARNING: the train gate exited {rc} but the land lease/approval for {story_id} could not be "
+              f"updated: {exc}", flush=True)
+
+
+def _gate_heartbeat(args: argparse.Namespace):
+    """Keep a recorded gate alive in the lease record for the whole run: a train gate's line entry and the
+    `gating` stamp of a train or of the holder's window gate. Without merge_train, or with a lease record that
+    cannot be resolved here, nothing beats (the train checks report the latter as `train gate not run`)."""
+    mt, ll = _merge_train(), _land_lease()
+    if not (args.story_id and args.record) or mt is None or ll is None:
+        return contextlib.nullcontext()
+    try:
+        return mt.heartbeat(args.story_id, ll.default_path())
+    except (ll.LeaseError, OSError):
+        return contextlib.nullcontext()
+
+
 def _land_merge(story_id: str, branch: str, summary: str) -> int:
     """Merge the story branch into the main checkout under the shared stack's gate lock (the
     base branch is the shared stack's source, so the merge waits while its gate runs). Exit:
@@ -845,6 +877,10 @@ def main(argv: list[str] | None = None) -> int:
                          "code-tree, base) to the story's record; on any non-zero exit while the story "
                          "holds the land lease, withdraw its checkpoint-3 approval and release the lease; "
                          "a preflight still failing after the readiness wait ran no test: exit 75")
+    ap.add_argument("--train", action="store_true",
+                    help="with --story-id and --record: gate the story's train branch while it waits in the "
+                         "land lease's line (merge_train.py); exit 75 with `train gate not run: <reason>` when "
+                         "the train checks fail; a red gate withdraws the approval and leaves the line")
     ap.add_argument("--hold-lock-for", choices=sorted(LOCKED_ACTIONS), metavar="ACTION",
                     help=f"run one named operation under the shared stack's gate lock instead of the "
                          f"suite; one of {sorted(LOCKED_ACTIONS)}")
@@ -858,16 +894,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.record and not args.story_id:
         print("ERROR: --record needs --story-id")
         return 2
+    if args.train and not (args.story_id and args.record):
+        ap.error("--train needs --story-id and --record")
+    if args.train and (_merge_train() is None or _land_lease() is None):
+        print("ERROR: --train needs merge_train.py and land_lease.py — the train gate was not run")
+        return 2
 
     head: list[str] = []
+    withdraw = _withdraw_train if args.train else _withdraw_if_holding
     try:
-        rc, not_run = _gate_main(args, head)
+        with _gate_heartbeat(args):
+            rc, not_run = _gate_main(args, head)
     except BaseException:
         if args.record:
-            _withdraw_if_holding(args.story_id, 1, head[0] if head else None)
+            withdraw(args.story_id, 1, head[0] if head else None)
         raise
     if rc != 0 and args.record and not not_run:
-        _withdraw_if_holding(args.story_id, rc, head[0] if head else None)
+        withdraw(args.story_id, rc, head[0] if head else None)
     return rc
 
 
@@ -886,6 +929,12 @@ def _gate_main(args: argparse.Namespace, known_head: list[str]) -> tuple[int, bo
               f"(config: tests_policy.required_flags) — suite not run.")
         return 2, False
     expected_branch = args.expected_branch or (ctx.get("branch", "") if args.story_id else "")
+    mt, ll = _merge_train(), _land_lease()
+    if args.train:
+        prefix = str(wfconfig.get("git.branch_prefix", "story/"))
+        branch = str(ctx.get("branch", ""))
+        suffix = branch[len(prefix):] if prefix and branch.startswith(prefix) else branch
+        expected_branch = str(wfconfig.get("git.train_prefix", "train/")) + suffix
     env = run_env(ctx)
     stack = str(ctx["stack"])
     print(f"stack: {stack}  cwd: {ctx['worktree']}")
@@ -898,6 +947,11 @@ def _gate_main(args: argparse.Namespace, known_head: list[str]) -> tuple[int, bo
         print(f"  lock: {_lock_path(stack)}")
         print(f"  the gate line file cannot be used: {exc.cause}" if exc.cause else
               "  another full suite is still holding it; retry, or raise --lock-timeout-minutes.")
+        if args.train:
+            # No test ran: the same "not run" as a failed check, so nothing is withdrawn.
+            print(f"{mt.NOT_RUN_MARKER} the gate lock was not acquired within {args.lock_timeout_minutes}m",
+                  flush=True)
+            return mt.NOT_RUN_EXIT, True
         return 1, False
 
     try:
@@ -907,6 +961,16 @@ def _gate_main(args: argparse.Namespace, known_head: list[str]) -> tuple[int, bo
             print("gate refused: the main checkout is mid-merge (MERGE_HEAD present) — resolve it first")
             return 1, False
         tree = base = ""
+        ahead: list[str] = []
+        lease_path = ll.default_path() if ll is not None else None
+        if args.train:
+            try:
+                reason = mt.not_run_reason(args.story_id, str(ctx["worktree"]), expected_branch)
+            except (mt.TrainError, ll.LeaseError, OSError) as exc:
+                reason = f"the train checks could not run: {exc}"
+            if reason:
+                print(f"{mt.NOT_RUN_MARKER} {reason}", flush=True)
+                return mt.NOT_RUN_EXIT, True
         if args.record:
             # Hashed before the run: the code freeze holds the tree for the whole gate.
             from run_scoped_tests import tested_tree
@@ -917,14 +981,41 @@ def _gate_main(args: argparse.Namespace, known_head: list[str]) -> tuple[int, bo
             except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
                 print(f"ERROR: the gate was not started: its tested tree or base cannot be determined: {exc}")
                 return 2, False
+        if args.train:
+            ahead = mt.begin_gate(args.story_id, lease_path)
+        elif args.record and mt is not None:
+            mt.mark_holder(args.story_id, str(ctx["worktree"]), "gating")
         not_run: list[int] = []
         rc = _run_gate(ctx, expected_branch, env, not_run=not_run if args.record else None)
         if not_run:
+            if args.train:
+                print(f"{mt.NOT_RUN_MARKER} preflight failed (stack_preflight.py exit {not_run[0]})", flush=True)
+                try:
+                    mt.reset_train(args.story_id, lease_path)
+                except (mt.TrainError, ll.LeaseError, OSError) as exc:
+                    print(f"WARNING: the train gate did not run but {args.story_id}'s train could not be "
+                          f"reset: {exc}", flush=True)
+                return mt.NOT_RUN_EXIT, True
             return _preflight_not_run(args.story_id, not_run[0]), True
         if args.record and rc == 0:
             from story_record import cmd_append
-            cmd_append(args.story_id, f"pre-merge gate GREEN -- run_full_suite all legs (exit 0) "
-                                      f"HEAD {known_head[0]} code-tree {tree} base {base[:12]}")
+            if args.train:
+                cmd_append(args.story_id, f"pre-merge gate GREEN -- run_full_suite all legs on {expected_branch} "
+                                          f"(exit 0) HEAD {known_head[0]} code-tree {tree} base {base[:12]} "
+                                          f"train {','.join(ahead)}")
+                try:
+                    mt.finish_green(args.story_id, lease_path)
+                except (mt.TrainError, ll.LeaseError, OSError) as exc:
+                    print(f"WARNING: the train gate passed but {args.story_id}'s train could not be marked "
+                          f"green: {exc}", flush=True)
+                    # `gating` still carries the gate's fresh stamp, which would hold every poll off a rebuild.
+                    with contextlib.suppress(ll.LeaseError, OSError):
+                        mt.reset_train(args.story_id, lease_path)
+            else:
+                cmd_append(args.story_id, f"pre-merge gate GREEN -- run_full_suite all legs (exit 0) "
+                                          f"HEAD {known_head[0]} code-tree {tree} base {base[:12]}")
+                if mt is not None:
+                    mt.mark_holder(args.story_id, str(ctx["worktree"]), "green")
         return rc, False
     finally:
         lock.release()
