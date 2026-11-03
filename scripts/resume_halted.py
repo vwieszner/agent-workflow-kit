@@ -20,7 +20,11 @@ Refusals (exit 1, `{"status": "refused", "message": ...}`, nothing written):
   * the id names no sprint-status key (sprint_status.py resolves it);
   * the story has no failure entry, or its row reads `done` or `superseded`;
   * `--ruling` is absent or blank (`--no-ruling` resumes an entry that asked nothing, e.g. a
-    test-fix exhaustion or a stack failure the owner has fixed);
+    test-fix exhaustion or a stack failure the owner has fixed); an entry whose `asked_of` is
+    `external` asked only the external design owner and needs no ruling;
+  * the latest entry's `asked_of` is `external` or `both` and its `external_ticket` is not done in
+    the design-question tracker (`config: paths.design_questions`: the ticket's row Status starts
+    with `config: design.done_marker`), or has no row there: the design owner's part is open;
   * the failure-log mutex is not acquired within its wait;
   * the row's status, read again once the mutex is held, differs from the first read.
 
@@ -53,6 +57,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 import _bookkeeping as bk  # noqa: E402
+import _design  # noqa: E402
 import halt_release as hr  # noqa: E402
 import log_failure  # noqa: E402
 import wfconfig  # noqa: E402
@@ -137,8 +142,6 @@ def resume(repo: Path, given_id: str, ruling: str, no_ruling: bool) -> tuple[dic
     key, status = row["key"], row["value"]
     if status in FINISHED:
         raise Refusal(f"{key} reads {status}; a finished story has nothing to resume")
-    if not ruling and not no_ruling:
-        raise Refusal("the owner's answer is owed: pass it as --ruling (or --no-ruling when the halt asked nothing)")
 
     log_path = repo / bk.failure_log_rel()
     try:
@@ -156,6 +159,16 @@ def resume(repo: Path, given_id: str, ruling: str, no_ruling: bool) -> tuple[dic
         blocks = [b for b in bk.failure_blocks(lines) if bk.same_story(b["story_id"], given_id)]
         if not blocks:
             raise Refusal(f"no failure entry for {given_id} ({key}) in {bk.failure_log_rel().as_posix()}")
+        fields = blocks[-1]["fields"]
+        asked = (fields.get("asked_of") or "").strip()
+        if asked in ("external", "both"):
+            ticket = (fields.get("external_ticket") or "").strip()
+            state = _design.ticket_status(repo, ticket) if ticket else None
+            if not _design.is_done(state):
+                raise Refusal(f"the design owner's part is open: {ticket or 'the entry names no ticket'} "
+                              + (f"reads {state}" if state else "has no row in the design-question tracker"))
+        if not ruling and not no_ruling and asked != "external":
+            raise Refusal("the owner's answer is owed: pass it as --ruling (or --no-ruling when the halt asked nothing)")
         entries = bk.entry_texts(log_text, given_id)
         try:
             written = release(repo, key, status, log_text, blocks, entries, ruling)

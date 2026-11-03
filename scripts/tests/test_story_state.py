@@ -21,7 +21,6 @@ import json
 import os
 import subprocess
 import sys
-import textwrap
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -273,14 +272,10 @@ class AttentionTests(World):
 
     def failure(self, story, extra=""):
         log = self.arts / "auto-dev-failures.md"
-        log.write_text("# Failures\n\n" + textwrap.dedent(f"""\
-            ## {story} — 2026-01-05T10:00:00 — story-spec
-
-            - branch: story/{story} (PRESERVED — checkout to inspect)
-            - failure_step: spec-open-questions
-            - failure_summary: two questions
-            {extra}
-            """))
+        lines = ["# Failures", "", f"## {story} — 2026-01-05T10:00:00 — story-spec", "",
+                 f"- branch: story/{story} (PRESERVED — checkout to inspect)", "- failure_step: spec-open-questions",
+                 "- failure_summary: two questions", *([extra] if extra else []), ""]
+        log.write_text("\n".join(lines) + "\n")
 
     def tracker_file(self, rows):
         (self.root / "docs" / "design-questions.md").write_text(
