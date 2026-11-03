@@ -12,6 +12,7 @@ exit codes.
 |---|---|
 | `wfconfig.py` | The only config loader (`.workflow/config.toml`). CLI: `get <key>`, `ports <slot>`, `render <template>`, `root`. |
 | `install.py` | Installed copy of the kit installer; `render-agent <file>` renders a kit-source agent. |
+| `plugin_setup.py` | Set up a project for the Claude Code plugin (the `setup` skill): `.workflow/config.toml`, local rules files, `.gitignore`, slot registry, the kit's `permissions.deny` rules; names kit hooks an `install.py` install still wires. `--dry-run`. 0 done, 1 error. |
 | `check_agent_frontmatter.py` | Agent model/effort policy check; `--hook` runs it as PostToolUse(Write\|Edit) with a block decision. |
 | `gen_agent_effort_variants.py` | Writes/checks `story-impl-xhigh` / `story-impl-max` from `story-impl.md` (`--check` exits 1 on drift). Kit-maintainer script. |
 | `agent_roles.py` | Effort variant → base agent role (`base_role`); imported by guards, ledger and readers. |

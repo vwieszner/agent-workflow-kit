@@ -94,7 +94,10 @@ def git_allowed(cmd: str) -> bool:
         if tok.split("=", 1)[0] not in GIT_OPTIONS[sub]:
             return False
     return True
-SPRINT = re.compile(r"^(?:uv run --no-project|python3?) (?:[A-Za-z]:)?(?:[\w./-]+/)?\.workflow/scripts/sprint_status\.py"
+# `.workflow/scripts/` (install.py route) or the kit's own scripts dir (plugin route), quoted or not.
+_KIT_SCRIPTS = re.escape((Path(__file__).resolve().parent.parent.parent / "scripts").as_posix())
+SPRINT = re.compile(r"^(?:uv run --no-project|python3?) [\"']?(?:(?:[A-Za-z]:)?(?:[\w./-]+/)?\.workflow/scripts|"
+                    + _KIT_SCRIPTS + r")/sprint_status\.py[\"']?"
                     r"((?: --dry-run| --path[ =][^\s'\"]+)*) (\w+)(?: |$)")
 SPRINT_READ = {"get", "list", "body", "history"}
 ACCEPTED = ("story-propagate's Bash runs one command per call, no shell operators: "

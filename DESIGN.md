@@ -62,6 +62,7 @@ agent-workflow-kit/
 | `workflows/<n>.js` | `.workflow/workflows/<n>.js` (always; `node .workflow/scripts/workflow_replay.mjs` runs it where no Workflow tool exists — needs Node ≥ 18) and `.claude/workflows/<n>.js` (claude/both) |
 | `adapters/opencode/plugins/*.ts` | `.opencode/plugins/` |
 | `adapters/claude/settings.hooks.json` | merged into `.claude/settings.json` |
+| everything above (Claude Code only) | alternatively generated into the plugin `plugins/agent-workflow-kit/` by `install.py build-plugin`: prose paths become `${CLAUDE_PLUGIN_ROOT}/…` (`<plugin-root>/…` inside code), hooks go to `hooks/hooks.json` with `--role auto` for per-agent checks, agents drop `hooks`/`permissionMode` and scope their `skills:`, the `setup` skill (`plugin/skills/setup`) creates the project-owned files, and `.claude-plugin/marketplace.json` publishes it |
 
 **Every path written in skill/agent/rule prose uses the INSTALLED path**:
 `.workflow/scripts/story_setup.py`, `.workflow/config.toml`, `.workflow/rules/<x>.md`,

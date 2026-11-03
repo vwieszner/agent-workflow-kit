@@ -1,0 +1,420 @@
+{
+  "description": "agent-workflow-kit guards and session hooks",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/dispatch_prompt.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/phase_dispatch.py\"",
+            "timeout": 90
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/agent_dispatch.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/clear_offer.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/phase_dispatch.py\"",
+            "timeout": 90
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/auto_dev_keep.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/clear_offer.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/bash_command.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/agent_source_read.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/process_kill.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/auto_dev_keep.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/clear_offer.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/mutation_command.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/repro_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/story_write_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/propagate_paths.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/powershell_command.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/agent_source_read.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/process_kill.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/auto_dev_keep.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/clear_offer.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/mutation_command.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/repro_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/story_write_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/propagate_paths.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/review_run_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/review_code_paths.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/repro_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/story_write_paths.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/propagate_paths.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/land_lease_wait.py\"",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "StructuredOutput",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/review_coverage.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/graph_query.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/mcp_readonly.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/playwright_paths.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/script_registration.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/check_agent_frontmatter.py\" --hook",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/context_cap.py\" --role auto",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptExpansion": [
+      {
+        "matcher": "auto-dev-loop",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/auto_dev_keep.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_journal.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/guards/land_lease_wait.py\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_journal.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/inject_path_rules.py\" --auto",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_journal.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/agent_outcome.py\" --role auto",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_retrospective.py\" --tool claude",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_retrospective.py\" --tool claude",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_start.py\" startup --plugin",
+            "timeout": 90
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_start.py\" clear --plugin",
+            "timeout": 90
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_start.py\" compact --plugin",
+            "timeout": 90
+          }
+        ]
+      },
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/session_start.py\" resume --plugin",
+            "timeout": 90
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/notification.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/notification.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "InstructionsLoaded": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/hooks/session/instructions_loaded.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

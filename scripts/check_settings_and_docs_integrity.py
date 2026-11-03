@@ -106,9 +106,51 @@ def tracked_files(repo: Path) -> set[str] | None:
     return set(r.stdout.splitlines()) if r.returncode == 0 else None
 
 
+# Running from a Claude Code plugin install: the plugin's own hooks/hooks.json beside this scripts dir.
+KIT_ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_HOOKS_JSON = KIT_ROOT / "hooks" / "hooks.json"
+
+
+def plugin_hooks_refs(failures: list[str]) -> list[str] | None:
+    """Kit-root-relative scripts the plugin's hooks.json runs; None outside a plugin install."""
+    if not PLUGIN_HOOKS_JSON.is_file():
+        return None
+    try:
+        data = json.loads(PLUGIN_HOOKS_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        failures.append(f"[hooks] cannot parse {PLUGIN_HOOKS_JSON}: {e}")
+        return []
+    refs = []
+    for entries in (data.get("hooks") or {}).values():
+        for entry in entries or []:
+            for hook in entry.get("hooks", []) or []:
+                cmd = str(hook.get("command") or "")
+                for token in re.findall(r"\$\{CLAUDE_PLUGIN_ROOT\}\"?/([\w./-]+\.py)", cmd):
+                    refs.append(token)
+    return refs
+
+
+def check_plugin_hooks(failures: list[str]) -> int:
+    refs = plugin_hooks_refs(failures)
+    if refs is None:
+        return 0
+    if not refs:
+        failures.append(f"[hooks] extracted ZERO script references from {PLUGIN_HOOKS_JSON}")
+        return 0
+    for rel in sorted(set(refs)):
+        if not (KIT_ROOT / rel).is_file():
+            failures.append(f"[hooks] the plugin's hooks.json references a missing script: {rel}")
+    return len(set(refs))
+
+
 def check_hooks(repo: Path, failures: list[str]) -> int:
     sources = {SETTINGS_REL: settings_refs(repo, failures), PLUGIN_REL: plugin_refs(repo)}
     present = {k: v for k, v in sources.items() if v is not None}
+    if PLUGIN_HOOKS_JSON.is_file():
+        # A plugin install: the plugin's hooks are the adapter; project settings may hold none of the kit's.
+        n = check_plugin_hooks(failures)
+        present = {k: [r for r in v if ".workflow/hooks/" in r] for k, v in present.items()}
+        return n + sum(len(v) for v in present.values())
     if not present:
         failures.append(f"[hooks] neither {SETTINGS_REL} nor {PLUGIN_REL} exists — "
                         "no hook adapter to check; a zero-check pass is not a pass")

@@ -44,6 +44,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
+# `--role auto`: agent type (effort variants and plugin scope removed) -> role.
+AUTO_ROLES = {"story-impl": "impl", "story-diagnose": "diagnose"}
 import wfconfig  # noqa: E402
 
 CAP_TOKENS = int(wfconfig.get("context_cap.tokens", 300_000))
@@ -118,14 +120,22 @@ def log(entry: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(allow_abbrev=False)
-    ap.add_argument("--role", choices=sorted(MESSAGES), required=True)
+    ap.add_argument("--role", choices=sorted(MESSAGES) + ["auto"], required=True)
     role = ap.parse_args(argv).role
-    entry = {"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "role": role}
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")
     except ValueError:
-        log(entry | {"event": "unreadable-payload"})
+        if role != "auto":
+            log({"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "role": role, "event": "unreadable-payload"})
         return 0
+    if role == "auto":
+        # One global PostToolUse registration (a plugin's agents cannot carry their own hooks): the role
+        # follows the calling agent; the main session and any other agent pass.
+        from agent_roles import base_role
+        role = AUTO_ROLES.get(base_role(payload.get("agent_type")) or "")
+        if role is None:
+            return 0
+    entry = {"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "role": role}
     entry["agent_id"] = payload.get("agent_id")
     path = transcript_file(payload)
     try:

@@ -28,6 +28,30 @@ A portable, spec-driven, human-gated development workflow for coding agents. It 
 
 ## Install
 
+Two routes: the **Claude Code plugin** (Claude Code only, nothing copied into the project but its
+config), or **`install.py`** (Claude Code and/or OpenCode, everything copied into the project).
+
+### Claude Code plugin
+
+```
+/plugin marketplace add vwieszner/agent-workflow-kit
+/plugin install agent-workflow-kit@agent-workflow-kit
+```
+
+Then, in each project, invoke the `agent-workflow-kit:setup` skill: it creates `.workflow/config.toml`,
+the project rules files and the slot registry, and adds the kit's deny rules to `.claude/settings.json`.
+Skills, agents and the review workflow are named `agent-workflow-kit:<name>`. The plugin's
+SessionStart hook injects the working rules (`AGENTS.md`) and `.workflow/AGENTS.local.md`, since a
+plugin cannot load CLAUDE.md. Agents use the example config's models and list the graph, docs and
+browser MCP tools; a project that needs other models uses the `install.py` route. Do not combine the
+two routes in one project: every guard would run twice (setup warns when it finds both).
+
+The plugin under `plugins/agent-workflow-kit/` is generated: edit the kit, then run
+`python3 install.py build-plugin` (`--check` reports drift; the tests fail on it) and
+`claude plugin validate ./plugins/agent-workflow-kit`.
+
+### install.py
+
 ```bash
 python3 agent-workflow-kit/install.py install --target /path/to/project --tool both      # or opencode | claude
 python3 agent-workflow-kit/install.py install --target /path/to/project --tool both --dry-run

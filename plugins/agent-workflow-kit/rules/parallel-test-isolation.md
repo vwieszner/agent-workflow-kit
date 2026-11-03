@@ -1,0 +1,74 @@
+---
+name: parallel-test-isolation
+description: MANDATORY. New code and new tests must be safe under the parallel full gate (forked worker processes, per-worker databases, shared external services, parallel E2E workers). Deferred connections, no cross-test module state, per-test isolation tokens for shared live infra, per-worker E2E account shards.
+---
+# Parallel Test Isolation
+
+**Status: HARD RULE.** The full gate (`${CLAUDE_PLUGIN_ROOT}/scripts/run_full_suite.py`) runs backend tests in
+parallel worker processes (typically forked from a primed parent, each with its own cloned/reused test
+database) and E2E tests with multiple workers. Scoped single-process runs cannot catch violations;
+only the full gate does.
+
+## Backend / service code
+- **Defer connection work to first use.** No import-time database / cache / queue / graph / vector /
+  HTTP client construction.
+- **No module-level singletons holding live connections.** Services are instantiated per request or
+  per test. A connection inherited across `fork()` is shared by every worker.
+- **No cross-test state in module-level dicts/lists** in tests.
+
+## Tests against shared live infrastructure
+External services that are NOT cloned per worker (a single graph DB, vector store, broker, object
+store) are shared by every worker.
+- Every seed, read-back and cleanup MUST be keyed on a **per-test unique token** (e.g. a `uuid4` tag)
+  supplied by the project's live-infra test base (`config: tests_policy.live_infra_test_bases`).
+- **Never key isolation on a bare database primary key** unless that key's sequence is proven
+  disjoint per worker (cloned worker DBs restart sequences, so two workers mint the same ids). Check
+  the runner's actual banding, do not assume.
+- A scope filter applied after the search (post-seek filter) is not isolation.
+- When workers share one collection/namespace, access it only through the project's isolation wrapper
+  that enforces the per-worker partition on every read — never a raw client. A test needing a raw
+  client or its own schema creates its own uniquely named collection/namespace and deletes it.
+
+## E2E
+- Tests consume **per-worker account shards** via the worker-scoped fixture
+  (`config: tests_policy.e2e_worker_fixture`) — never share an account across workers; bulk-delete
+  helpers race.
+- Raising worker capacity requires bumping every knob in `config: tests_policy.e2e_capacity_knobs`
+  together; one without the other silently under-seeds.
+
+## Live-infra tests
+- Live-infra tests run in the full gate's single parallel pass with everything else. Never exclude them
+  by tag or marker — that drops them from the run entirely.
+
+## Worker counts
+- Cap every concurrent leg's worker count explicitly (unit, E2E, backend). An uncapped runner forks
+  one worker per CPU and oversubscribes the host alongside the other legs, pushing CPU-bound tests
+  past their timeout. Never raise a test timeout to absorb that — restore the cap.
+- The concurrent legs share ONE joint worker budget sized for the host. Never size a leg as if it
+  ran alone (`auto`, one per CPU). Changing one leg's count means re-measuring the gate against the
+  joint budget.
+
+## Per-test timeouts
+- Never raise a runner-wide test or hook timeout, or a wait/find timeout, to make a failure go away.
+- A per-test timeout is the last resort for a test still slower than the per-test budget: only after
+  its root cause is proven, the proven costs are cut (except a cost whose only cut removes asserted
+  behaviour), and its residual is measured. Measure the residual as the median of several whole-leg
+  runs on a quiet host (no other test run on it, CPU samples low throughout); the value is that
+  median times the heaviest host-load factor measured under the full gate, times a 1.25 margin,
+  rounded up, and is recorded per test in the story's measurements.
+- A residual is explained only when its cost is attributed to correct work (for example the render
+  cost of a large page), with the evidence recorded. An unattributed residual goes to the owner.
+- A timeout bump labelled as a mitigation is removed only when measurements taken under full-gate
+  parallel load show the path fits the default budget. Idle-host or isolated runs do not count.
+  Record the figures and the load next to the removal.
+
+## When to run the full gate before merge
+Run it whenever the change can touch the parallel surface:
+- Shared infra: settings/config modules, app startup hooks, fork handlers, test runner/fixtures/
+  conftest, worker/server/queue config.
+- A new connection-holding singleton or module-level client.
+- Seed commands, E2E config, shared E2E helpers, or any worker-shard plumbing.
+- The end of a wave (combined diffs interact).
+
+Pure feature stories touching only their own module + tests: scoped green + post-merge smoke suffice.
+When in doubt, run the full gate.

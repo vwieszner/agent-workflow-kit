@@ -55,10 +55,25 @@ def rule_text(name: str) -> str:
             f"relative to your worktree root:\n{body}\n")
 
 
+def auto_text(payload: dict) -> str:
+    """`--auto` (one registration, e.g. a plugin's): every `config: path_rules.names` rule, for an agent
+    whose type (plugin scope removed) matches `config: path_rules.agents`."""
+    import wfconfig
+    from agent_roles import unscope
+
+    pattern = str(wfconfig.get("path_rules.agents", r"^story-(impl|impl-xhigh|impl-max|finalize|rebase)$"))
+    if not re.search(pattern, str(unscope(payload.get("agent_type")) or "")):
+        return ""
+    return "".join(rule_text(str(n)) for n in (wfconfig.get("path_rules.names", []) or []))
+
+
 def main(argv: list[str]) -> int:
     try:
-        json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")
-        text = rule_text(argv[0]) if len(argv) == 1 else ""
+        payload = json.loads(sys.stdin.buffer.read().decode("utf-8") or "{}")
+        if argv == ["--auto"]:
+            text = auto_text(payload if isinstance(payload, dict) else {})
+        else:
+            text = rule_text(argv[0]) if len(argv) == 1 else ""
         if text:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
                                                      "additionalContext": text}}))

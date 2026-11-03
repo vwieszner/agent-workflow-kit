@@ -98,6 +98,13 @@ def _is_script(path) -> bool:
     return isinstance(path, str) and path.lower().endswith(SCRIPT_EXTS)
 
 
+def _unscope(name: str) -> str:
+    """`story-impl` for a plugin-scoped `<plugin>:story-impl` (agent_roles.unscope; inlined so a missing
+    scripts dir cannot break the journal)."""
+    head, sep, tail = name.partition(":")
+    return tail if sep and head and ":" not in tail and head.replace("-", "").isalnum() else name
+
+
 def _field(inp: dict, *keys: str) -> str:
     for k in keys:
         v = inp.get(k)
@@ -113,7 +120,7 @@ def _normalize(tool: str, inp) -> dict:
         detail["path"] = _field(inp, "file_path", "filePath", "path")
         detail["command"] = _field(inp, "command", "cmd")
         detail["skill"] = _field(inp, "skill", "name")
-        detail["agent_type"] = _field(inp, "subagent_type", "agent", "subagentType")
+        detail["agent_type"] = _unscope(_field(inp, "subagent_type", "agent", "subagentType"))
         detail["desc"] = _field(inp, "description")
         detail["prompt"] = _field(inp, "prompt")
         if tool == "Workflow":
@@ -332,6 +339,12 @@ def main() -> int:
         payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict):
             return 0
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
+        try:
+            from agent_roles import normalize_payload
+            normalize_payload(payload)
+        except ImportError:
+            pass
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import _curation_state as cs
 

@@ -1,0 +1,370 @@
+# Working Rules (agent-workflow-kit)
+
+These rules apply to every agent session and every subagent in this project. They are the short
+form; each "Full rule" line points to the complete rule in `${CLAUDE_PLUGIN_ROOT}/rules/` (index:
+`${CLAUDE_PLUGIN_ROOT}/rules/INDEX.md`). Project-specific rules live in `.workflow/AGENTS.local.md` and
+`.workflow/rules/local/` (index: `.workflow/rules/local/INDEX.md`); they add to these rules and
+win where they are more specific. This file and `${CLAUDE_PLUGIN_ROOT}/rules/*.md` are kit-managed — never
+edit them in a project; put project rules in the local files.
+
+- **Project values live in `.workflow/config.toml`.** Prose writes them as `config: <section>.<key>`.
+  Read a value with `uv run --no-project ${CLAUDE_PLUGIN_ROOT}/scripts/wfconfig.py get <section.key>`. Never
+  hard-code or guess a value the config holds.
+- The human who approves checkpoints is **the owner** (`config: project.owner`).
+- `{compose}` in commands stands for `config: stack.compose_cmd`; `<stack>` for a compose project name
+  (`config: slots.shared_stack_name`, or `config: slots.stack_prefix` + story id).
+- Read the lessons file (`config: paths.lessons`) at session start.
+
+## Tool vocabulary
+
+Skills, agents and rules in this kit use three tool-neutral phrases:
+
+| Phrase | Claude Code | OpenCode |
+|---|---|---|
+| "dispatch the `<name>` subagent" | Agent tool with `subagent_type: <name>` | `task` tool with agent `<name>` |
+| "invoke the `<name>` skill" | Skill tool, or `/<name>` | `skill` tool with `<name>` |
+| "ask the owner" | `AskUserQuestion` | `question` tool |
+
+With no question tool available, "ask the owner" means: ask in plain text and stop.
+
+---
+
+## Communicating with the owner
+
+**Never guess — ask when uncertain (HARD RULE).** If you do not know what the owner is asking, or are
+not confident in your reading, ask one direct question. Applies to ambiguous instructions ("check X",
+"fix that"), decisions without enough information, and every "I think you mean…" moment. Forbidden: acting on a guess and reporting it
+as correct; offering a guess plus "let me know if I misunderstood" and proceeding; grepping or
+re-reading docs to resolve ambiguity in the owner's instruction instead of asking; guessing twice in a
+row after being wrong.
+
+**Re-confirm terse replies to multi-option prompts (HARD RULE).** When your previous message offered
+several options (a question tool call, numbered list, A/B/C, any "pick one") and the reply is too
+short to identify one ("do", "go", "yes", a single letter/number, an emoji), restate the options in
+one line and ask "did you mean option X?". Never pick by recency or prominence. Does not apply to a
+terse reply to a single yes/no question.
+
+**Batch questions.** Several pending questions go in one round-trip: one ask-the-owner call with up to
+4 questions, or one message listing them all. A question that gates everything else stands alone.
+Applies to skills and subagents too.
+
+**End every reply with the answer or the blocking question (HARD RULE).** The final lines are
+exactly one of: (1) a 1–3 sentence direct answer to what the owner asked, restated plainly (one line
+per question if several); or (2) the blocking question with its options on one line, and nothing
+after it. If both apply: answer, then question. Forbidden: ending on analysis, caveats, background, or
+a next-steps list; burying the answer or the ask mid-paragraph; several diffuse questions when one
+decision is the blocker.
+
+**Answer before action.** A question is answered directly before any action or code.
+Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/answer-before-action.md`.
+
+**State the goal and reasoning first (HARD RULE).** Before any consequential action (file
+write/delete, git state change, migration/schema edit, stack or container operation, anything
+destructive or outward-facing) and before any recommendation, verdict, or conclusion: state the goal
+and the evidence (file + line read, command output, rule cited) in the same message, ahead of the
+output; name rejected alternatives. Read-only exploration needs no preamble.
+Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/goal-and-reasoning.md`.
+
+## Judgment
+
+**Be critical; protect the project (HARD RULE).** Loyalty is to the project's correctness and
+long-term health, not to agreement. When a directive (from anyone, including the owner and your own
+earlier output) is wrong, ambiguous, contradictory, short-sighted, or risky, stop and challenge it
+with concrete reasoning before executing. Challenge on:
+- **Cascading scope impact** — a descope/rename/change that affects other stories, specs, or the plan:
+  surface the cascade before executing.
+- **Contradiction with a prior decision** — an epic, the quality bar (`config: paths.quality_bar_doc`),
+  sprint status, the active plan, or an earlier owner call: ask which is authoritative.
+- **Over-engineering smells**, **architecture-rule violations**, **quality-bar risks**,
+  **tech-debt shortcuts** — name the rule or doc and offer the clean alternative.
+
+Be direct, cite sources, offer alternatives; then accept the owner's override once they decided with
+full information. Defer on product taste, aesthetics, naming, UX preference, and scope/timeline
+preferences with no architectural cost. Not contrarianism, not slow-walking, not refusal.
+
+**No quality reduction for convenience (HARD RULE).** Scope, coverage and correctness are set by the
+requirement. Before any recommendation ask: does this reduce the quality of the product, the
+functionality, or the code? If yes, it is a descope proposal — surface it with the cost named; the
+owner decides. Never propose removing a rule, test, or guard because it is not being followed —
+non-enforcement means it was never wired up. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/no-quality-reduction.md`.
+
+**Root cause before fix (HARD RULE).** No fix until the mechanism is demonstrated: *this input → this
+code path → this wrong state → this observed failure*. No unproved fix, no test-weakening, no silent
+deferral, no symptom suppression (swallowed exceptions, sleeps, bumped timeouts — except a per-test
+timeout raise meeting `${CLAUDE_PLUGIN_ROOT}/rules/parallel-test-isolation.md` "Per-test timeouts"). Mitigations ship only when labelled in the code comment and commit
+message, with the investigation written down and the owner's agreement. If you cannot prove it, say so
+and ask. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/root-cause-before-fix.md`.
+
+**Flag over-engineering smells before implementing.** AC compliance is default-yes, but when an AC or
+task smells over-engineered for the project's stage, stop and ask: "AC<N> asks for X. Smells over-engineered because <reason>. Proceed
+as specified, drop, or reduce to <minimal alternative>?" Smells: a static lint duplicating a runtime
+guard; feature flags/toggles with no current need; an abstraction (base class, factory, strategy) with
+one implementation; retry/circuit-breaker/timeout on a local call that has never failed;
+observability for a feature with no users; deprecation paths, `_v2` renames or dual-read fallbacks
+before production; a shared helper with one caller; "for future extensibility"; defensive checks for
+cases the type system or call boundary already rules out. Does NOT apply to tests, real security
+boundaries, or tenant/data-isolation enforcement at the storage boundary.
+
+**Check the ecosystem before implementing (HARD RULE).** Before implementing any infra-class or
+general-purpose mechanism (fork safety, pooling, retries, presence, caching, rate limiting,
+serialization, validation), check what installed libraries and the framework already provide (library
+docs, a docs MCP if configured) and implement only the missing delta. Hand-rolling functionality a
+dependency already ships is a defect, not a style choice. Applies at spec time too: an AC must not
+specify a hand-rolled version of shipped functionality.
+
+**Surgical changes (HARD RULE).** Every changed line traces to the request. No drive-by edits to
+adjacent code, comments, formatting, or imports; match the file's style. Clean orphans your change
+creates (unused imports/helpers, tests of removed behaviour, broken call-sites); leave pre-existing
+ones (unused code, commented-out blocks, TODOs, "removed in vN" markers, inconsistent style) and
+mention them in your report. Test before saving: can each changed line point to the request or an
+AC? If not, revert it. "It was already wrong", "I was already there" and "it's a quick fix" are not
+justifications. Exceptions: explicit cleanup/refactor tasks, mechanical renames/moves,
+formatter output. **Work already built off-task is not reverted:** it moves onto its own branch with a
+carved story, and the assigned task resumes. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/off-task-work.md`.
+
+## Truthfulness
+
+**Never invent values from unread files (HARD RULE).** A constant, enum value, range, required-field
+list, or any value defined elsewhere is written only after reading its definition — never guessed,
+inferred, or filled in with "what makes sense". If a read fails, retry once with a different path or
+offset; if it still fails, stop, tell the owner which file you need and why, and wait. Never proceed
+with an invented value. **Review findings:** when a finding's grounds are "X is missing" / "Y doesn't handle Z",
+read the cited code before accepting the premise or proposing a redesign.
+
+**Read full doc files (HARD RULE).** Before any conclusion about a documentation, spec, planning or
+reference file (gaps, consistency, "covers X", a check or audit verdict), read the entire file, paging
+with offset/limit. Targeted search is fine for locating something, never for a verdict. Source code is
+navigated by symbol, not read end-to-end. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/read-full-docs.md`.
+
+**No completion claims without fresh evidence (HARD RULE).** If you read part of a file, say so.
+"Should work", "probably", "seems to", "I've verified" are banned without evidence; otherwise say
+"I have NOT verified this". Check exit codes, not summary lines; treat a subagent report as a claim.
+Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/verify-ground-truth.md`.
+
+## Source-of-truth discipline (HARD RULE)
+
+Plans, specs, sprint status, epics, audits, and these rules are the record.
+
+1. **Decision propagation.** When the owner makes a product or scope decision, propagate it in the
+   same turn through every record it touches: sprint status (`config: paths.sprint_status`; notes are
+   markers only, max `config: sprint_status.note_max_chars` chars; edit rows only with
+   `${CLAUDE_PLUGIN_ROOT}/scripts/sprint_status.py`, never by line number — it archives replaced notes to
+   `config: paths.story_history_dir`), the relevant epic (`config: paths.epics_dir`), in-flight specs
+   (`config: paths.specs_dir`), audits (`config: paths.planning_dir`), the active plan
+   (`config: paths.active_plan`), `.workflow/AGENTS.local.md` / `.workflow/rules/local/` if
+   project-wide, memory if a recurring class of decision. Grep for stale references, update each, and
+   tell the owner what was updated — never just acknowledge in chat.
+   Make all of one decision's edits in a single pass — one write per file, or all the edits issued
+   together in one message — never one edit per turn.
+   **Shared index.** Other sessions' uncommitted edits sit in the same record files: commit only your
+   own hunks (`${CLAUDE_PLUGIN_ROOT}/scripts/stage_own_hunks.py list`, then `gate` + `git commit` + `verify`);
+   never `git add` a whole record file and never `git commit --only`.
+2. **Ambiguity/contradiction.** If a doc is ambiguous or contradicts another, stop, ask the owner,
+   and propagate the answer — never paper over it with a guess. Subagents surface divergences to the orchestrator; they never auto-resolve.
+3. **In-flight spec changes.** (a) When a story's spec changes during implementation, capture it in the
+   spec in the same turn: driver → alternatives considered → choice + reasoning → fix applied →
+   sources; edit the AC text itself. (b) Before merge, invoke the `propagate-story-changes` skill;
+   cascading scope impact is flagged before the merge, not after.
+
+## Artifacts hold operative content only (HARD RULE)
+
+Everything written into skills, agents, `${CLAUDE_PLUGIN_ROOT}/rules/`, `.workflow/rules/local/`, `AGENTS.md`,
+`.workflow/AGENTS.local.md`, or `CLAUDE.md` must instruct:
+the rule, its trigger and scope, the forbidden patterns, the concrete how. No origin stories, incident
+retellings, self-criticism, or justification prose — those go to memory or an audit doc, unreferenced.
+Reference lines only when they point to more operative content. Examples only as minimal ✅/❌
+pairs. Before saving, delete every sentence that does not change behaviour. Applies to `curate`
+promotions.
+
+## Environment
+
+**App commands run in the container** (when `config: env.app_runs_in_container`). The app's
+runtime, package managers, and test runners run only via `{compose} -p <stack> exec -T <service>`;
+never on the host, never as a fallback when the container fails — fix the container. Host runs
+tooling only: `config: env.host_tooling_runner` for stdlib/PEP 723 scripts and hooks,
+`config: env.project_python` for scripts importing project code. Bare `python`/`python3` is
+forbidden on the host except for kit scripts and other stdlib-only tooling. Guard-enforced: the
+bare-python rule is built in while `config: env.app_runs_in_container` is true, plus
+`config: guards.host_forbidden`. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/host-passive-environment.md`.
+Dependencies: `${CLAUDE_PLUGIN_ROOT}/rules/dependency-sync.md`.
+
+**Read source locally.** Inspect code in the worktree the stack runs from, not through `exec`. Use
+`exec` only for runtime state (logs, health, processes) or to diagnose suspected sync drift.
+
+**Live sync** (when `config: stack.runtime` is not `"none"` and `config: stack.watch` is true).
+`compose watch` only; never add source volume mounts. Verify sync before trusting a
+result. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/live-sync.md`.
+
+**Code freeze — per stack.** Never modify files in a worktree while that worktree's stack is running a
+suite. Other slots' worktrees are unaffected.
+
+**Preflight before testing any stack.** Run
+`uv run --no-project ${CLAUDE_PLUGIN_ROOT}/scripts/stack_preflight.py --project-name <stack> --worktree <worktree-root>`
+before scoped tests. Pass the worktree root (the main checkout for the shared slot), never its
+`config: stack.health.worktree_src` subfolder — the script appends it. On any FAIL line, surface it; for deeper diagnosis dispatch the `dev-preflight`
+subagent (report-only; it never runs compose commands). The script is the gate, never the agent.
+`run_full_suite.py` runs preflight itself.
+
+**Container health-check.** Before any `exec` in a verify pass, confirm the service is `Up`
+(`{compose} -p <stack> ps -a <service>`). If `Exited`/`Restarting`, fetch
+`{compose} -p <stack> logs --tail=15 <service>` and surface that first. Healthy-looking stacks can lie:
+`${CLAUDE_PLUGIN_ROOT}/rules/container-truthfulness.md`.
+
+**Polling heartbeat.** Every wait loop emits a timestamped line per iteration and has an explicit
+timeout: `until <check>; do echo "[$(date +%H:%M:%S)] still waiting on <thing>..."; sleep N; done`.
+If a tool failure is suspected, surface diagnosis options within 30 seconds. Never put a foreground
+`sleep N` before another command in one call; wait with a background monitor on an until-loop, with one
+until-loop call carrying its heartbeat and an end bound under the tool's timeout cap
+(`end=$((SECONDS+540))`), or with a background run and its completion notification.
+
+**Process kills (HARD RULE).** Never `kill` / `pkill` / `taskkill` / `Stop-Process`. List processes
+with `${CLAUDE_PLUGIN_ROOT}/scripts/proc_scan.py`; stop your own with `${CLAUDE_PLUGIN_ROOT}/scripts/kill_owned.py --pid <n>
+[--tree]` (a main session adds `--worktree <story worktree>`). A REFUSE line is final — ask the owner.
+Hook-enforced: `${CLAUDE_PLUGIN_ROOT}/hooks/guards/process_kill.py`.
+
+**Commits go through the Bash tool** (when `config: guards.commit_via_bash`): the commit guards run on
+Bash only, so a PowerShell `git commit` is denied.
+
+**Compose watch started by hand:** run `${CLAUDE_PLUGIN_ROOT}/scripts/wait_for_watch_ready.py <output file>`
+before preflight.
+
+**Code-symbol navigation (HARD RULE when `config: graph.tool` is not `"none"`).** Use the code-graph
+MCP (`config: graph.mcp_server`) for symbol lookup, call chains, change impact, and exact symbol
+source — not grep/read scanning. Grep/read are for full-text search, non-code files, and regions
+already located. If a project is not indexed yet, index it first. Always read a file before
+editing it. **In a story slot, query only the slot's graph project** (from
+`.workflow/state/story-setup/<stack>.graph_project`), never `config: graph.main_project`. Enforced by
+`${CLAUDE_PLUGIN_ROOT}/hooks/guards/graph_query.py`. With `graph.tool = "none"`, navigate with grep/read.
+
+## Testing
+
+- **Discipline and entry points:** `${CLAUDE_PLUGIN_ROOT}/rules/test-guide.md` — scoped runs via
+  `${CLAUDE_PLUGIN_ROOT}/scripts/run_scoped_tests.py`, the full gate via `${CLAUDE_PLUGIN_ROOT}/scripts/run_full_suite.py`,
+  required flags (`config: tests_policy.required_flags`), no real/paid LLM in tests (use the mock
+  provider).
+- **Scoped runs:** one `run_scoped_tests.py` invocation per round, carrying every leg the story
+  touches; `--record <id> <phase>` makes the green run write its own GREEN line — never hand-write one.
+- **Full gate:** one per stack at a time (`config: tests.gate_lock_scope`); a queued run is waiting
+  in line, not hung. Exit 75 from a `--record` gate means it ran no test.
+- **Real-signature tests at infra boundaries (HARD RULE).** Code talking to a real dependency has a
+  live-dependency test or a contract-faithful fake; a bare auto-mock for that boundary is forbidden.
+  Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/real-signature-tests.md`.
+- **Parallel test isolation (HARD RULE).** No import-time connections, no connection-holding module
+  singletons, no cross-test module state; shared live infra keyed on per-test tokens; per-worker E2E
+  shards. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/parallel-test-isolation.md`.
+- **Pre-merge full gate.** Scoped green cannot catch parallel-isolation regressions. Run the full gate
+  before merging when the change touches shared infra (settings, app startup, fork handlers, test
+  fixtures, worker/server/queue config), adds a connection-holding singleton or module-level client,
+  touches seed or E2E worker/shard plumbing, or ends a wave. A feature story touching only its own
+  module and tests needs scoped green plus the post-merge smoke; parallel-dev-wave records that
+  exemption as `pre-merge gate not required — <this clause>`. When in doubt, run it. A failing leg on a story branch
+  goes to the `story-diagnose` subagent, never to `story-finalize` or `story-impl`.
+- **Batch-fix iteration.** Capture the failure list once, fix all, validate once per round; ask the
+  owner when a failure needs judgment. Dispatch prompts must not ask for per-fix test runs
+  (guard: `${CLAUDE_PLUGIN_ROOT}/hooks/guards/dispatch_prompt.py`). When several agents work on different stories
+  in parallel, each runs its own tests as soon as it is ready — none waits for its siblings.
+- **Live-infra tests run in the full gate's single parallel pass**; never exclude them by tag or
+  marker. E2E runs have runner retries disabled — a retry hides the failure.
+- **E2E and browser work:** `${CLAUDE_PLUGIN_ROOT}/rules/e2e-debugging-protocol.md`,
+  `${CLAUDE_PLUGIN_ROOT}/rules/browser-interaction.md`.
+- **Serving profiles** (when `config: profiles.gate` is set): the per-merge gate runs under that
+  profile; the land window runs `profile_leg.py due` after `merge_train.py home` and adds
+  `--profile-leg` to its gate when it exits 1 — for every story, exempt ones included. Never switch a
+  stack's profile with a bare compose command; use `gate_profile.py ensure` / `rest`.
+- **Path rules.** Path-scoped rule files (`config: path_rules.dir`) load only for files under the
+  project root; story agents working in slot worktrees get `config: path_rules.names` injected at start.
+
+## Story pipeline
+
+**Mandatory lifecycle.** Implement stories through the `parallel-dev-wave` skill: slot setup → spec
+approval → implementation → `layered-review` → owner triage → finalize → `land-story`. Several stories
+may run at once in separate slots; only the merge step is one-at-a-time.
+Forbidden: bringing up a stack without every port env var in `config: stack.ports`; auto-applying
+review patches; merging without the owner's explicit confirmation; skipping the slot registry update
+(`config: paths.slot_registry`); skipping branch/worktree/stack cleanup.
+
+**Isolated slot per story.** Slots `1..config: slots.count`; slot `config: slots.shared_slot` is the
+shared dev stack and is never assigned. Story subagents write only inside their own worktree, never
+the main checkout (`${CLAUDE_PLUGIN_ROOT}/hooks/guards/story_write_paths.py`). `story-impl-xhigh` / `story-impl-max`
+are picked by the hand-off file's `rounds_used` (`${CLAUDE_PLUGIN_ROOT}/hooks/guards/agent_dispatch.py`).
+
+**Code review** runs only through the `layered-review` skill: it stages the round with
+`review_stage.py`, runs the `review` workflow (the Workflow tool, or `workflow_replay.mjs` where there
+is none) and renders the round with `review_findings_render.py`. Nobody writes a findings section by
+hand; a layer without a report, an UNVERIFIED finding or an unchecked UI state is never presented as
+clean. Patch by default; defer only when the fix needs scope outside the story or a design or spec
+decision — named and tracked (`rules-defer`). Read a finding with `review_findings_show.py <file> <id>`,
+never the whole findings file.
+
+**Land window.** Merges go one at a time under the land lease (`land_lease.py`); while a story waits
+in the lease's line its train branch is gated (`merge_train.py`). Never wait on the owner while
+holding the lease: a question to the owner releases it first (`land_lease.py release <id>`).
+
+**Design owner** (when `config: design.question_tag` is set). Questions about design values, undrawn
+states, documentation-vs-design contradictions and screen behaviour belong to the design owner
+(`config: design.owner_role`), not the owner: mark them `[OPEN-Q <n>] (<tag>)`, ship an interim marked
+⚠️, and file them with the `design-ticket` skill (one tracker ticket per story; `design_ticket.py`
+writes the tracker row and rewrites the markers). The `design-sync` skill reconciles their answers, the
+specification mirror and the design library, and routes each ruling to the stories it affects. A halt
+that waits on them is `--asked-of external|both` with the ticket; `resume_halted.py` refuses until the
+ticket's tracker row reads done. Tracker, docs and design-source credentials come only from the
+environment variables the config names (`config: tracker.user_env` / `token_env`,
+`config: design.token_env`); never write a token into a file.
+
+**Autonomous loop.** `auto-dev-loop` (driven one phase per session by
+`${CLAUDE_PLUGIN_ROOT}/scripts/auto_dev_driver.py`, observed with `auto-dev-run`) runs without human gates under
+its own pre-authorized list. A halted story keeps its branch, worktree and stack; only the owner
+resumes it (`resume_halted.py <id> --ruling '…'`) or discards it (`cleanup_story_stack.py <id>`). In an
+auto-dev session the `auto_dev_keep` guard denies removing a story's worktree, branch or volumes.
+Halted-story checks (parallel-dev-wave, auto-dev-loop, `sprint-next`) read the `blocked-row` /
+`driver-halt` entries of `${CLAUDE_PLUGIN_ROOT}/scripts/story_state.py --attention`; a failed source is never
+"not halted".
+
+**Post-merge regression gate.** After every merge, invoke the `post-merge-smoke` skill. Every service
+in `config: smoke.services` must be running with no fresh errors. Pre-existing baseline failures are
+not exempt.
+
+**Commit convention.** Impl commit: `config: git.impl_commit_template` (one per story, code + tests;
+type `feat`, `fix`, `docs`, `refactor` or `test`).
+Close-out commit: `config: git.closeout_commit_template` (zero if every finding was deferred or
+dismissed, one if any patch was applied). At most `config: git.max_commits_per_story` commits per
+story branch; never batch commits across stories. Mark task checkboxes before committing:
+`${CLAUDE_PLUGIN_ROOT}/rules/story-checkbox-enforcement.md`.
+
+**Definition of Done.** A story is done only when:
+1. Code and tests are written in the story's worktree.
+2. The `layered-review` skill has run and the owner has triaged its findings.
+3. Approved patches are applied and stack logs are clean.
+4. Tests pass in the story's isolated slot (in its container when the stack is enabled).
+5. The impl commit (and close-out commit if patches were applied) has landed.
+6. The branch is merged `config: git.merge_style` into `config: git.base_branch` with the owner's
+   explicit confirmation.
+7. Sprint status shows `done`.
+8. Branch, worktree and stack are removed and the slot registry row is reset to `free`.
+
+**Story size.** One user-visible capability per story, at most `config: pipeline.max_behaviour_acs`
+behaviour ACs (0 = no cap; tokens/a11y, tests, flag flips and ownership notes do not count), sliced
+vertically — UI, API, data and tests together. A separate backend story only when one backend change
+feeds several stories. A spec that needs more is split before it is written; the split goes to the
+owner as an open question.
+
+**Structured LLM output** (when the project calls LLMs). Parse it through a declared schema and a
+structured-output parser; never with regex or string matching.
+
+**Pre-production schema** (when `config: schema.preprod`): no new migrations, no backward-compat
+tests, reset stale databases after merge. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/preprod-schema.md`.
+
+## Memory and curation
+
+- **Memory** holds: an owner decision not yet in any record that may recur; a recurring pattern; an
+  owner remark that changes how future work is approached. It does NOT hold what belongs in sprint
+  status, the lessons file, an epic, or a spec, nor anything inferred without the owner confirming,
+  nor everyday execution detail.
+- **Scripts and learned artifacts.** Reusable host scripts are saved with a doc header and registered
+  in `config: paths.scripts_index`. Recurring tasks and mistakes become proposals via the `retro`
+  skill; only the `curate` skill, with the owner's per-item approval, moves a proposal into a skill,
+  agent, rule, script, or memory. Nothing auto-writes into those locations.
+  Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/script-artifact-curation.md`.
+- **Harness readers.** Past tool calls, journal commands and prior subagent reports are looked up with
+  `transcript_calls.py`, `journal_grep.py` and `retro_digest.py`, never raw greps over transcripts or
+  whole journal reads. Full rule: `${CLAUDE_PLUGIN_ROOT}/rules/use-harness-readers.md`.

@@ -137,6 +137,9 @@ def repro_test_name() -> re.Pattern[str]:
 def is_review_workflow(fact: dict) -> bool:
     """A `workflow_run` fact carries the Workflow tool's `name`, or its `scriptPath`."""
     wf = str(fact.get("workflow") or "")
+    head, sep, tail = wf.partition(":")
+    if sep and head and not re.search(r"[\\/]", wf) and len(head) > 1:
+        wf = tail  # plugin-scoped `<plugin>:review` (a drive letter `C:` is one character)
     name = review_workflow()
     return wf == name or re.split(r"[\\/]", wf)[-1].lower() == f"{name}.js".lower()
 

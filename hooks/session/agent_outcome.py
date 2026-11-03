@@ -54,6 +54,9 @@ import tempfile
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent.parent / "scripts"
+# `--role auto`: agent type (effort variants and plugin scope removed) -> role.
+AUTO_ROLES = {"story-impl": "impl", "story-finalize": "finalize", "story-diagnose": "diagnose",
+              "story-propagate": "propagate", "repro-writer": "repro", "pbt-writer": "repro"}
 sys.path.insert(0, str(SCRIPTS))
 import wfconfig  # noqa: E402
 
@@ -345,10 +348,18 @@ def blocks_so_far(agent_id: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    ap.add_argument("--role", required=True, choices=("impl", "finalize", "diagnose", "repro", "propagate"))
+    ap.add_argument("--role", required=True, choices=("impl", "finalize", "diagnose", "repro", "propagate", "auto"))
     a = ap.parse_args(argv)
     try:
         payload = json.loads(sys.stdin.buffer.read().lstrip(b"\xef\xbb\xbf").decode("utf-8"))
+        from agent_roles import base_role, normalize_payload
+        normalize_payload(payload)
+        if a.role == "auto":
+            # One global SubagentStop registration (a plugin's agents cannot carry their own hooks): the role
+            # follows the stopping agent; any other agent passes.
+            a.role = AUTO_ROLES.get(base_role(payload.get("agent_type")) or "")
+            if a.role is None:
+                return 0
         if a.role == "repro" and payload.get("agent_type") not in ("repro-writer", "pbt-writer"):
             return 0
         prompt, last = transcript_texts(payload.get("agent_transcript_path"))

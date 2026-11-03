@@ -224,11 +224,21 @@ def git_bash_path(env: dict[str, str]) -> Path | None:
     return None
 
 
+# The kit installed as a Claude Code plugin: its files live beside this scripts dir, outside the project.
+KIT_ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_INSTALL = (KIT_ROOT / "hooks" / "hooks.json").is_file()
+PLUGIN_GLOBS = (("agents", "*.md"), ("skills", "**/*"), ("workflows", "*.js"), ("rules", "**/*.md"),
+                ("scripts", "*.py"), ("hooks", "**/*.py"), ("hooks", "hooks.json"), (".", "AGENTS.md"))
+
+
 def agent_knobs(repo: Path | None = None) -> dict[str, dict[str, str]]:
     """Each installed agent's `model`, `effort` and `maxTurns` from its frontmatter."""
     repo = repo or REPO
     out = {}
-    for folder in (repo / ".claude" / "agents", repo / ".opencode" / "agents"):
+    folders = [repo / ".claude" / "agents", repo / ".opencode" / "agents"]
+    if PLUGIN_INSTALL:
+        folders.append(KIT_ROOT / "agents")
+    for folder in folders:
         for path in sorted(folder.glob("*.md")):
             lines = path.read_text(encoding="utf-8").splitlines()
             if not lines or lines[0].strip() != "---":
@@ -253,11 +263,24 @@ def harness_paths(repo: Path | None = None) -> list[Path]:
     return [p for p in dict.fromkeys(paths) if p.is_file()]
 
 
+def plugin_paths() -> list[Path]:
+    """The plugin's own harness files (empty outside a plugin install)."""
+    if not PLUGIN_INSTALL:
+        return []
+    paths = []
+    for folder, pattern in PLUGIN_GLOBS:
+        paths += sorted(p for p in (KIT_ROOT / folder).glob(pattern)
+                        if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc")
+    return list(dict.fromkeys(paths))
+
+
 def harness_id(repo: Path | None = None) -> str:
     repo = repo or REPO
     digest = hashlib.sha256()
     for path in harness_paths(repo):
         digest.update(path.relative_to(repo).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    for path in plugin_paths():
+        digest.update(b"plugin:" + path.relative_to(KIT_ROOT).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()[:12]
 
 
@@ -322,7 +345,9 @@ def init_problem(init: dict) -> str | None:
     missing = [t for t in required_tools() if tools.isdisjoint(TOOL_NAMES.get(t, (t,)))]
     if "auto-dev-loop" not in (init.get("skills") or []):
         missing.append("skill auto-dev-loop")
-    missing += [f"agent {a}" for a in required_agents() if a not in (init.get("agents") or [])]
+    from agent_roles import unscope
+    have = {unscope(str(x)) for x in (init.get("agents") or [])}
+    missing += [f"agent {a}" for a in required_agents() if a not in have]
     return f"session lacks {', '.join(missing)}" if missing else None
 
 

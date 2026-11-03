@@ -35,7 +35,14 @@ def read_payload() -> dict[str, Any] | None:
         payload = json.loads(raw.decode("utf-8"))
     except Exception:
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        from agent_roles import normalize_payload
+        normalize_payload(payload)
+    except Exception:
+        pass
+    return payload
 
 
 def cfg(key: str, default: Any) -> Any:
@@ -413,8 +420,11 @@ def _segments(cmd: str) -> list[str]:
 
 _PY = r"python3?(?:\.\d+)?(?:\.exe)?"
 BARE_PYTHON = re.compile(rf"^{_PY}(?=\s|$)", re.IGNORECASE)
-# A stdlib-only kit script (`python3 .workflow/scripts/x.py`) is sanctioned tooling.
-KIT_SCRIPT = re.compile(rf"^{_PY}\s+(?:-\S+\s+)*[\"']?(?:\./)?\.workflow[\\/](?:scripts|hooks)[\\/]",
+# A stdlib-only kit script (`python3 .workflow/scripts/x.py`, or the same script at the kit's own
+# install location, e.g. a Claude Code plugin's root) is sanctioned tooling.
+KIT_ROOT = Path(__file__).resolve().parent.parent.parent
+_KIT_ROOT_RX = re.escape(KIT_ROOT.as_posix()).replace("/", r"[\\/]")
+KIT_SCRIPT = re.compile(rf"^{_PY}\s+(?:-\S+\s+)*[\"']?(?:(?:\./)?\.workflow|{_KIT_ROOT_RX})[\\/](?:scripts|hooks)[\\/]",
                         re.IGNORECASE)
 
 
