@@ -56,7 +56,8 @@ IS a bug in this mode. Anything this list does not name is not pre-authorized.
 - When installed: `land_lease.py acquire` / `release` / `holds`, `merge_train.py`
   (`wait`, `home`, `settle`), `branch_overlap.py`, the `story-rebase` dispatch onto
   `config: git.base_branch` with `validate: stack` together with the conflict resolutions it makes
-  under the 11c.3 rules, and the pre-merge gate `run_full_suite.py --story-id <id> --record`.
+  under the 11c.3 rules, and the pre-merge gate `run_full_suite.py --story-id <id> --record` (with
+  `--profile-leg` when `profile_leg.py due` exits 1).
 - The resume path's git operations in the story worktree: Step 3a′'s plain rebase and its
   `git rebase --abort`; Step 7's repro clean-up; Step 10's fold of `wip:` and docs commits into the
   impl (or close-out) commit (`git commit-tree`, `git reset --soft`).
@@ -609,6 +610,9 @@ Without `land_lease.py` installed, steps 1–3b are skipped (say so) and the gat
      Exit 0: step 2. Exit 3 (a stalled holder or head of line): halt-and-release,
      `failure_step="land-lease-timeout"`. Exit 4 (a red train gate): `failure_step="train-gate"`.
    - Before step 2, every window: `merge_train.py home <story_id>` (exit 2: `failure_step="land-window-rebase"`).
+   - Then `profile_leg.py due`. Exit 1: the gate in step 4 adds `--profile-leg`, and a story with a carried
+     verdict (step 3b) or recorded `not required` gates anyway. Exit 0 or 3 (not configured): no
+     `--profile-leg`. Exit 2: halt-and-release, `failure_step="profile-leg-due-unknown"`.
 2. Fold a resumed branch as in Step 10 (a commit after the close-out folds into the close-out). A
    failed fold: `failure_step="resume-fold"`.
 3. **Final rebase.** Skip when `merge-base --is-ancestor <base> <branch>` holds. Otherwise:
@@ -626,10 +630,11 @@ Without `land_lease.py` installed, steps 1–3b are skipped (say so) and the gat
         or the result would change behaviour neither side wrote.
    3. Resolved conflicts: append `land-window rebase onto <sha12>: <n> conflicted files resolved — <file>: <resolution>; …`.
       A HALT: halt-and-release, `failure_step="land-window-rebase"`.
-3b. When the latest pre-merge verdict is a train GREEN or `pre-merge gate not required — …`, run
+3b. When the profile leg is not due and the latest pre-merge verdict is a train GREEN or `pre-merge gate not required — …`, run
    `merge_train.py settle <story_id>`: exit 0 skips step 4; exit 1 → step 4; exit 2:
    `failure_step="land-window-rebase"`.
-4. **Gate** (unless exempt): `run_full_suite.py --story-id <story_id> --record`. All green records
+4. **Gate** (unless exempt and not due): `run_full_suite.py --story-id <story_id> --record` (plus
+   `--profile-leg` when due). All green records
    `pre-merge gate GREEN` itself. A non-zero exit withdraws the checkpoint-3 approval and releases the
    lease; when the run was killed before its exit handler (`land_lease.py holds <story_id>` exits 0),
    append `checkpoint-3 approval withdrawn -- pre-merge gate exit <rc>` and release the lease yourself.

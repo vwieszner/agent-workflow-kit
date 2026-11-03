@@ -44,10 +44,11 @@ MARKER = "WORKFLOW_AUTO_DEV_RUN"
 SKILL = "auto-dev-loop"
 
 _DATA_ARG_SCRIPTS = {
-    "halt_release.py": {"--story-id", "--failure-step", "--failure-summary", "--last-test-output", "--repo-root"},
+    "halt_release.py": {"--story-id", "--failure-step", "--failure-summary", "--last-test-output", "--repo-root",
+                        "--asked-of", "--external-ticket", "--external-item"},
     "log_failure.py": {"--story-id", "--branch-name", "--failure-step", "--failure-summary", "--wip-commit",
-                       "--last-test-output", "--log-path", "--mutex-timeout-ms"},
-    "resume_halted.py": {"--ruling", "--repo-root"},
+                       "--last-test-output", "--log-path", "--mutex-timeout-ms", "--asked-of", "--external-ticket"},
+    "resume_halted.py": {"--ruling", "--no-ruling", "--repo-root"},
 }
 _STORY_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*")
 _WORKTREE_REMOVE = re.compile(r"\bgit\b.*\bworktree\s+remove\b", re.I)

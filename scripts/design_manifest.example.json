@@ -1,0 +1,13 @@
+{
+  "_comment": "Design manifest (config: design.manifest). Copy into the project, fill in the file keys and frames. design_library.py reads design_source; ui-design-compare reads frames through the library build's frame maps.",
+  "design_source": {
+    "_note": "Figma file keys: the library file holds the published components and styles, the screens file holds the drawn screens.",
+    "library_file_key": "<library file key>",
+    "screens_file_key": "<screens file key>",
+    "render_scale": 1,
+    "frames": [
+      {"slug": "dashboard-empty", "node": "10:290", "ticket": "<optional ticket key>"},
+      {"slug": "dashboard-populated", "node": "668:3199"}
+    ]
+  }
+}

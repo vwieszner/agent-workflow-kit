@@ -73,7 +73,8 @@ class HaltResumeTests(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = halt_release.main(["--story-id", "1-2", "--failure-step", "story-impl",
-                                      "--failure-summary", "tests red after 5 rounds", *extra])
+                                      "--failure-summary", "tests red after 5 rounds",
+                                      *(extra or ("--asked-of", "owner"))])
         return code, json.loads(out.getvalue())
 
     def resume(self, *argv):
@@ -123,7 +124,8 @@ class HaltResumeTests(unittest.TestCase):
     def test_line_break_refused_before_any_step(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            code = halt_release.main(["--story-id", "1-2", "--failure-step", "a\nb", "--failure-summary", "x"])
+            code = halt_release.main(["--story-id", "1-2", "--failure-step", "a\nb", "--failure-summary", "x",
+                                      "--asked-of", "owner"])
         self.assertEqual(code, 2)
         self.assertEqual(json.loads(out.getvalue())["status"], "refused")
         self.assertNotIn("wip:", git(self.wt, "log", "-1", "--format=%s"))

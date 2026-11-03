@@ -27,6 +27,16 @@ Read these in parallel:
 
 Land lease (not for `--cleanup-only`): `uv run --no-project .workflow/scripts/land_lease.py holds <story_id>` must exit 0 — the land window holds the lease from `acquire` to this skill's Step 5 release. Exit 1 or 2: stop and report the script's line; never acquire the lease from here.
 
+## Step 1b — Profile-leg backstop (not for `--cleanup-only`)
+
+```bash
+uv run --no-project .workflow/scripts/profile_leg.py due
+```
+
+Exit 0: the line is the merge count; continue to Step 2. Exit 3: no profile leg is configured (SKIPPED); continue. Exit 1: the profile-leg run is due (`config: profile_leg.every` merges to `config: git.base_branch` since the last green one, or none recorded). Exit 2: the script could not tell (unreadable record, or a recorded base the repository lacks) and printed the cause on stderr — an error, not a due run.
+
+The land window runs the profile leg itself when it is due, for every story, exempt ones included, so exit 1 here means the window gated without `--profile-leg`. On exit 1 or 2: release the lease (`uv run --no-project .workflow/scripts/land_lease.py release <story_id>`), then tell the owner — quote the script's line and, for exit 1, give the command `uv run --no-project .workflow/scripts/run_full_suite.py --story-id <story_id> --profile-leg --record`. The owner decides whether it runs before this merge; never start it from this step. If the owner then decides to land, the land window re-runs from `acquire`; this skill does not continue without the lease.
+
 If `--cleanup-only`: skip to **Step 4**.
 
 ## Step 2 — Merge into the base branch

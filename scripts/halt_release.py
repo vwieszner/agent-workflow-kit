@@ -21,16 +21,23 @@ and the later steps still run:
   6. watch   kills the worktree's orphan `compose watch` processes (no-op with stack.runtime none).
   7. stop    `{compose} -p <stack> stop`: containers, their logs and data volumes kept.
   8. slot    release_slot.py frees the slot-registry row.
-  9. commit  on the base branch in the main checkout: the story's sprint-status row, its
-             story-history file, its failure-log entry and its slot-registry row, each staged as
-             the index copy plus only this halt's change (`_bookkeeping.commit_own`), committed
-             only when nothing else was staged.
+  9. tracker with `--external-ticket`: the ticket's row in the design-question tracker
+             (`config: paths.design_questions`), unless the key already has one; skipped without a
+             ticket or without a tracker file.
+ 10. commit  on the base branch in the main checkout: the story's sprint-status row, its
+             story-history file, its failure-log entry, its slot-registry row and the tracker lines
+             carrying `[<ticket>]`, each staged as the index copy plus only this halt's change
+             (`_bookkeeping.commit_own`), committed only when nothing else was staged.
 
 Usage:
   uv run --no-project .workflow/scripts/halt_release.py --story-id 16-18 --failure-step spec-open-questions \
-      --failure-summary "story-spec returned 6 open questions: ..." [--last-test-output "<tail 30>"]
+      --failure-summary "story-spec returned 6 open questions: ..." --asked-of owner|external|both \
+      [--last-test-output "<tail 30>"] [--external-ticket KEY --external-item "<the tracker row's Item cell>"]
 
-A line break in `--story-id` or `--failure-step` is refused (exit 2) before any step.
+`--asked-of` is required. `external` and `both` need `--external-ticket`, and any non-empty
+`--external-ticket` must be exactly one ticket key (`config: paths.design_ticket_regex`). A missing
+`--asked-of`, a bad ticket, or a line break in `--story-id`, `--failure-step`, `--external-ticket` or
+`--external-item` is refused (exit 2) before any step.
 
 Output: one JSON line {"status": "halted"|"partial"|"refused", "story_id", "wip_commit",
 "bookkeeping_commit", "steps": {<step>: "ok ..."|"skipped: ..."|"FAILED: ..."}}.
@@ -48,7 +55,9 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 import _bookkeeping as bk  # noqa: E402
+import _design  # noqa: E402
 import wfconfig  # noqa: E402
+from log_failure import ASKED_OF, ticket_refusal  # noqa: E402
 
 DEFAULT_REPRO_NAME = r"^(test_(?:repro|pbt)_r\d+_\d+\.py|repro_r\d+_\d+\.test\.[cm]?[jt]sx?|repro-r\d+-\d+\.spec\.[cm]?[jt]s)$"
 # The step is read lazily, up to the first "; worktree kept", so a step that holds ";" is still stripped.
@@ -72,13 +81,37 @@ def halted_note(note: str, step: str, today: str) -> str:
     return new if len(new) <= cap else new[: cap - 1] + "…"
 
 
-def commit_bookkeeping(repo: Path, story_id: str, key: str, slot: int | None, step: str) -> str:
+def add_tracker_row(repo: Path, ticket: str, story_id: str, item: str, today: str, step: str) -> bool:
+    """Append the ticket's row to the design-question tracker; False when it already has one."""
+    rel = _design.tracker_rel()
+    path = repo / rel
+    if not path.is_file():
+        raise bk.StepError(f"{rel.as_posix()} does not exist")
+    try:
+        new, added = _design.insert_row(path.read_text(encoding="utf-8"), ticket, item,
+                                        f"{story_id} ships the interims, ⚠️", f"auto-dev, the {story_id} {step} halt",
+                                        today)
+    except ValueError as exc:
+        raise bk.StepError(f"{rel.as_posix()}: {exc}") from None
+    if added:
+        path.write_text(new, encoding="utf-8", newline="")
+    return added
+
+
+def commit_bookkeeping(repo: Path, story_id: str, key: str, slot: int | None, step: str, ticket: str = "") -> str:
     """Commit the story's own bookkeeping changes on the base branch; the new HEAD, or ''."""
     status, registry, log = bk.sprint_status_rel(), bk.registry_rel(), bk.failure_log_rel()
     history = bk.history_rel(key)
-    paths = [status, history, log, registry]
+    tracker = _design.tracker_rel() if ticket else None
+    paths = [status, history, log, registry] + ([tracker] if tracker else [])
 
     def stage_own() -> None:
+        if tracker is not None:
+            work = bk.work_text(repo, tracker)
+            if work is not None:
+                new = _design.own_lines(bk.index_text(repo, tracker) or "", work, lambda ln: f"[{ticket}]" in ln)
+                if new is not None:
+                    bk.stage_text(repo, tracker, new)
         base = bk.index_text(repo, status)
         work = bk.work_text(repo, status)
         if base is not None and work is not None:
@@ -111,10 +144,13 @@ def commit_bookkeeping(repo: Path, story_id: str, key: str, slot: int | None, st
 
 
 def refusal_of(args: argparse.Namespace) -> str:
-    for flag, value in (("--story-id", args.story_id), ("--failure-step", args.failure_step)):
+    if not args.asked_of:
+        return "--asked-of is required (owner, external or both)"
+    for flag, value in (("--story-id", args.story_id), ("--failure-step", args.failure_step),
+                        ("--external-ticket", args.external_ticket), ("--external-item", args.external_item)):
         if "".join(value.splitlines()) != value:
             return f"{flag} must be one line"
-    return ""
+    return ticket_refusal(args.asked_of, args.external_ticket)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -123,6 +159,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--failure-step", required=True)
     ap.add_argument("--failure-summary", required=True)
     ap.add_argument("--last-test-output", default="")
+    ap.add_argument("--asked-of", choices=ASKED_OF, default="", help="whose answers the halt waits on")
+    ap.add_argument("--external-ticket", default="", help="the story's design-owner question ticket")
+    ap.add_argument("--external-item", default="", help="the tracker row's Item cell for a new ticket")
     ap.add_argument("--repo-root", type=Path, default=None, help="main checkout (default: config repo root)")
     args = ap.parse_args(argv)
     refusal = refusal_of(args)
@@ -197,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     def entry():
         r = script("log_failure.py", "--story-id", story_id, "--branch-name", dash, "--failure-step", step,
                    "--failure-summary", args.failure_summary, "--wip-commit", out["wip_commit"],
+                   "--asked-of", args.asked_of, "--external-ticket", args.external_ticket,
                    "--last-test-output", args.last_test_output, "--log-path", str(repo / bk.failure_log_rel()))
         if r.returncode != 0 or '"logged"' not in r.stdout:
             raise bk.StepError((r.stdout + r.stderr).strip()[-300:])
@@ -241,14 +281,25 @@ def main(argv: list[str] | None = None) -> int:
             return "skipped: no in_use row"
         raise bk.StepError((r.stdout + r.stderr).strip()[-300:])
 
+    def tracker():
+        if not args.external_ticket:
+            return "skipped: no external ticket"
+        if not _design.configured():
+            return "skipped: config: paths.design_questions is empty"
+        item = args.external_item or f"questions of {story_id} (see the ticket)"
+        if not add_tracker_row(repo, args.external_ticket, story_id, item, date.today().isoformat(), step):
+            return f"skipped: {args.external_ticket} already in the tracker"
+
     def commit():
         if not key:
             raise bk.StepError("the sprint-status key is unknown (the note step failed)")
-        out["bookkeeping_commit"] = commit_bookkeeping(repo, story_id, key, slot, step)
+        ticket = args.external_ticket if _design.configured() else ""
+        out["bookkeeping_commit"] = commit_bookkeeping(repo, story_id, key, slot, step, ticket)
         return f"ok {out['bookkeeping_commit']}" if out["bookkeeping_commit"] else "skipped: nothing to commit"
 
     for name, body in (("draft", draft), ("wip", wip), ("note", note), ("entry", entry), ("lease", lease),
-                       ("watch", watch), ("stop", stop), ("slot", release), ("commit", commit)):
+                       ("watch", watch), ("stop", stop), ("slot", release), ("tracker", tracker),
+                       ("commit", commit)):
         attempt(name, body)
     failed = any(v.startswith("FAILED") for v in steps.values())
     print(json.dumps({"status": "partial" if failed else "halted", **out, "steps": steps}))

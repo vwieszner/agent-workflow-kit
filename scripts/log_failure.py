@@ -15,13 +15,20 @@ Usage:
     --failure-step story-impl \
     --failure-summary "Tests failed after 5 batch-fix rounds." \
     [--wip-commit abc1234] [--last-test-output "...tail 30..."] \
+    [--asked-of owner|external|both] [--external-ticket KEY] \
     [--log-path <file>] [--mutex-timeout-ms 30000]
+
+`--asked-of` records whose answers the halt waits on: `owner` (the project owner), `external` (the
+external design owner, `config: design.owner_role`, whose questions sit on a tracker ticket) or `both`.
+`external` and `both` need `--external-ticket`, and any non-empty `--external-ticket` must be exactly one
+ticket key (`config: paths.design_ticket_regex`) whatever `--asked-of` says: an entry whose ticket names
+no key could never be resumed. Each is refused (exit 2) before anything is written.
 
 `--branch-name` is the branch suffix: the logged branch is `config: git.branch_prefix` +
 branch-name. `--branch-name none` logs a question that has no story branch (a milestone-map
 refresh question): the entry then carries no Kept/Resume lines.
 
-A line break in `--story-id`, `--branch-name`, `--failure-step` or `--wip-commit` would split
+A line break in `--story-id`, `--branch-name`, `--failure-step`, `--wip-commit` or `--external-ticket` would split
 the entry's heading or end its leading field group; each is refused (exit 2, naming the flag)
 before anything is written. A multi-line `--failure-summary` has `\\r\\n` and bare `\\r` turned
 into line breaks and continues on lines indented two spaces, so a blank line or a `- key:` line
@@ -33,6 +40,8 @@ Entry format:
   - branch: <prefix><branch> (PRESERVED — checkout to inspect)
   - wip_commit: <hash>                (only when given)
   - failure_step: <step>
+  - asked_of: <owner|external|both>   (only when given)
+  - external_ticket: <key>            (only when given)
   - failure_summary: <first line>
     <further lines, indented>
 
@@ -52,12 +61,22 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _design  # noqa: E402
 import wfconfig  # noqa: E402
 from _named_mutex import NamedMutex  # noqa: E402
 
 LOG_MUTEX = "workflow-failure-log"
 MUTEX_TIMEOUT_MS = 30000
 DEFAULT_LOG = "docs/implementation-artifacts/auto-dev-failures.md"
+ASKED_OF = ("owner", "external", "both")
+
+
+def ticket_refusal(asked_of: str, ticket: str) -> str:
+    """Why an asked-of / ticket pair is refused, or ''. Shared with halt_release.py."""
+    if (asked_of in ("external", "both") or ticket) and not _design.is_ticket_key(ticket):
+        return ("--external-ticket must be one ticket key (config: paths.design_ticket_regex) when given; "
+                "--asked-of external or both needs one")
+    return ""
 
 HEADER = (
     "# Auto-Dev Loop — Permanent Failures\n\n"
@@ -79,13 +98,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--failure-summary", required=True)
     ap.add_argument("--wip-commit", default="")
     ap.add_argument("--last-test-output", default="")
+    ap.add_argument("--asked-of", choices=ASKED_OF, default="", help="whose answers the halt waits on")
+    ap.add_argument("--external-ticket", default="", help="the story's design-owner question ticket")
     ap.add_argument("--log-path", default=None, help="default: config paths.auto_dev_failure_log")
     ap.add_argument("--mutex-timeout-ms", type=int, default=MUTEX_TIMEOUT_MS)
     args = ap.parse_args(argv)
     for flag, value in (("--story-id", args.story_id), ("--branch-name", args.branch_name),
-                        ("--failure-step", args.failure_step), ("--wip-commit", args.wip_commit)):
+                        ("--failure-step", args.failure_step), ("--wip-commit", args.wip_commit),
+                        ("--external-ticket", args.external_ticket)):
         if "".join(value.splitlines()) != value:
             ap.error(f"{flag} must be one line")
+    refusal = ticket_refusal(args.asked_of, args.external_ticket)
+    if refusal:
+        ap.error(refusal)
     log_path = Path(args.log_path) if args.log_path else log_path_default()
     has_branch = args.branch_name != "none"
     branch = wfconfig.branch_name(args.branch_name)
@@ -106,6 +131,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.wip_commit:
                 lines.append(f"- wip_commit: {args.wip_commit}")
             lines.append(f"- failure_step: {args.failure_step}")
+            if args.asked_of:
+                lines.append(f"- asked_of: {args.asked_of}")
+            if args.external_ticket:
+                lines.append(f"- external_ticket: {args.external_ticket}")
             first, *rest = args.failure_summary.replace("\r\n", "\n").replace("\r", "\n").split("\n")
             lines.append(f"- failure_summary: {first}")
             lines += [f"  {line}" for line in rest]
@@ -116,9 +145,10 @@ def main(argv: list[str] | None = None) -> int:
                     "",
                     f"Kept: worktree `{worktree}`, branch `{branch}`, stack `{stack}` (containers stopped, "
                     "logs and data volumes kept). Slot released.",
-                    "Resume: once the halt's questions are answered, the owner runs "
+                    "Resume: once the halt's questions are answered (the design owner's part when the "
+                    "ticket's tracker row reads done), the owner runs "
                     f"`uv run --no-project .workflow/scripts/resume_halted.py {args.story_id} "
-                    "--ruling '<the ruling>'`; it archives this entry with the ruling, removes it and sets the "
+                    "--ruling '<the ruling>'` (`--no-ruling` when the halt asked only the design owner); it archives this entry with the ruling, removes it and sets the "
                     "row `ready-for-dev`; the loop can then pick the story again and reuses the worktree. "
                     "Discard (deletes worktree, stack data and branch):",
                     "```",
