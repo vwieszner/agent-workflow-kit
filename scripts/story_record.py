@@ -43,7 +43,8 @@ configured (SKIPPED). Exit 2: no spec found.
 ruled number becomes `OPEN-Q <n><rest> (<ruling>)` (a recommendation tail in `<rest>` is dropped).
 It refuses, exit 2 and spec unchanged: a malformed or repeated `<n>=<ruling>`; a ruled number with
 no marker; a marker tagged for an external owner (`(<tag>` with a tag in
-`config: spec.external_question_tags`), which that owner's tracker answers; a marker naming several
+`config: spec.external_question_tags`), which that owner's tracker answers (the design owner's:
+`design_ticket.py mark-spec`); a marker naming several
 numbers (`1, 2`, `1-3`, `1/2`, `1 and 2`). A rerun whose numbers are all already ruled writes
 nothing and exits 0. Line endings are preserved. It ends with `open`'s output and exit code.
 
@@ -225,7 +226,10 @@ def cmd_rule(story_id: str, pairs: list[str]) -> int:
             problems.append(f"'{m.group(0)}' names several questions ({', '.join(map(str, sorted(named)))}): "
                             "rule each one in the spec's prose")
         elif (tag := _external_tag(text, m.group("rest"), m.end())):
-            problems.append(f"'{m.group(0)}' is a ({tag}) marker: that owner's question tracker answers it")
+            how = ("file it with the design-ticket skill; design_ticket.py mark-spec rewrites the marker"
+                   if tag == str(wfconfig.get("design.question_tag", "") or "") else
+                   "that owner's question tracker answers it")
+            problems.append(f"'{m.group(0)}' is a ({tag}) marker: {how}")
     unbracketed = {n for n in set(rulings) - found if re.search(rf"(?<!\[)\bOPEN-Q {n}(?!\d)", text)}
     problems += [f"OPEN-Q {n}: no marker in {spec}" for n in sorted(set(rulings) - found - unbracketed)]
     if problems:

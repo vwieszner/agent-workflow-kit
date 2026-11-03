@@ -249,7 +249,7 @@ class ServerTests(unittest.TestCase):
                                                            "asked": "which icon?", "since": None}]}})
         self.assertEqual(self.request("GET", "/attention?asked_of=external")[0], 200)
         self.assertIn("which icon?", self.request("GET", "/attention?asked_of=external")[1])
-        self.assertEqual(self.request("GET", "/attention?asked_of=vilmo")[0], 400)
+        self.assertEqual(self.request("GET", "/attention?asked_of=someone")[0], 400)
 
     def test_static_allowlist(self):
         self.assertEqual(self.request("GET", "/static/htmx.min.js")[0], 200)

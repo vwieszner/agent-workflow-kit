@@ -62,6 +62,11 @@ Report each as one pass/fail line with the command's evidence:
    Name every agent type whose rate or repeats rose, with its top source. For each `--cut`, the
    `before / after the cut` row of the fix's agent type is that fix's measured effect. Drill into one
    agent type with `.workflow/scripts/denial_samples.py <type> --since <date>`.
+5. Autonomous-loop configurations (when `.workflow/state/auto-dev/` holds runs):
+   `uv run --no-project .workflow/scripts/auto_dev_metrics.py compare` groups driver sessions by
+   configuration fingerprint (model, effort, harness hash) and sets quality, cost and time beside each
+   group. Name the configuration that keeps or raises quality and speed at equal or lower cost, and every
+   group whose blocking findings, halts or later fixes rose.
 
 ## Step 4 — Mine the journals
 Invoke the `retro` skill. List the proposals it writes; promotion stays with `curate`.

@@ -281,7 +281,7 @@ the failure log holds an entry for the story (the resume command has not run) or
 **hand-blocked** and goes on like any other. A halted story: stop and tell the owner (to run
 `resume_halted.py <story_id>` when the entry stands; a failed halt is theirs to rule on); in driver
 mode end with `outcome=infra-stop`. An unreadable sprint-status file or failure log is an "Allowed
-stops" case, never "not halted".
+stops" case, never "not halted". The classification comes from `uv run --no-project .workflow/scripts/story_state.py --attention`: the story's `blocked-row` entry in `attention.entries` (every form of the id resolves to it; never match a literal `## <id> — ` heading). `failure_step` set: the failure entry stands. `failure_step` null, `note_status` `ok` and a `HALTED <date> at <step>` clause in `asked`: a failed halt. `note_status` `error`: the note read failed (`note_error`) — report the read failure. A `blocked` row with no `blocked-row` entry, or an `auto-dev failures` / `sprint-status` source reading `error`, cannot be told from a halted one and refuses too; a source `none` (no failure log) holds no entry.
 
 ```bash
 uv run --no-project .workflow/scripts/reserve_slot.py --story-id "<story_id>"

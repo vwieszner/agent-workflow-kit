@@ -12,7 +12,8 @@ Answer "what should we work on next?" from the source-of-truth files in one conc
 1. The slot registry (`config: paths.slot_registry`) — which slots are `in_use`, which are `free`.
 2. The tracker: `uv run --no-project .workflow/scripts/sprint_status.py list --exclude-status done --exclude-epics --notes` (row notes are marker sets; long form in `config: paths.story_history_dir`).
 3. The milestone in `config: loop.milestone` (when set): its dependency map (`config: milestones.<name>.map_file` / `map_key`) and its priority markers; the quality-bar doc (`config: paths.quality_bar_doc`) for tier definitions when set.
-4. The failure log (`config: paths.auto_dev_failure_log`) — input only: its `## <story-id> — <date> — <failure step>` headings and each entry's `- asked_of:` and ticket lines.
+4. The failure log (`config: paths.auto_dev_failure_log`) — input only: its `## <story-id> — <date> — <failure step>` headings and each entry's `- asked_of:` and `- external_ticket:` lines.
+5. The attention queue: `uv run --no-project .workflow/scripts/story_state.py --attention` — the `driver-halt` and `blocked-row` entries classify halted stories (every form of an id resolves; never match a literal heading), and each entry's `asked_of` (`owner` / `external`) is the waits-on rule (`story_state.waits_on`) over the story's latest failure entry. When the call fails, or its `auto-dev failures` or `sprint-status` source reads `error`, report it and list no story under Ready to Start or Recommendation.
 
 ## Step 2 — Extract the key facts
 
@@ -33,7 +34,7 @@ Slot number, story id, branch for each occupied slot. Then: "N slot(s) free."
 
 ### Halted
 
-Per halted story: id, failure step, date, the hard deps of its map row that are not `done`, and who it waits on — **waiting on <external owner> <ticket>** while the entry's `asked_of` names that owner and the ticket's row in `config: paths.design_questions` is not resolved; otherwise **resume decision due** (these lead the section). For a resume decision due: the owner rules, then `uv run --no-project .workflow/scripts/resume_halted.py <story_id> --ruling '<ruling>'` (an entry that asked the owner nothing takes `--no-ruling`). A `blocked` row with no failure entry is hand-blocked unless its note carries a `HALTED <date> at <step>` clause (a failed halt: the owner rules on it; print no command). A tracker or failure log that cannot be read is reported as such, and no story is listed under Ready to Start or Recommendation: an unread source is never "not halted". None halted: say so in one line.
+Per halted story (a `driver-halt` entry, or a `blocked-row` entry that is not hand-blocked: `failure_step` null, `note_status` `ok` and no `HALTED` clause in `asked`): id, failure step, date, the hard deps of its map row that are not `done`, and who it waits on — **waiting on <external owner> <ticket>** while the entry's `asked_of` names that owner and the ticket's row in `config: paths.design_questions` is not resolved; otherwise **resume decision due** (these lead the section). For a resume decision due: the owner rules, then `uv run --no-project .workflow/scripts/resume_halted.py <story_id> --ruling '<ruling>'` (an entry that asked the owner nothing takes `--no-ruling`). A `blocked` row with no failure entry is hand-blocked unless its note carries a `HALTED <date> at <step>` clause (a failed halt: the owner rules on it; print no command). A tracker or failure log that cannot be read is reported as such, and no story is listed under Ready to Start or Recommendation: an unread source is never "not halted". None halted: say so in one line.
 
 ### Ready to Start
 
