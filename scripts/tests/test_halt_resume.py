@@ -121,6 +121,39 @@ class HaltResumeTests(unittest.TestCase):
         self.assertIn("~~~~text", history)
         self.assertEqual("", git(self.root, "diff", "--cached", "--name-only"))
 
+    def test_external_halt_files_the_tracker_row_and_resume_waits_for_it(self):
+        cfg = self.root / ".workflow" / "config.toml"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace(
+            "[paths]\n", "[paths]\ndesign_questions = \"docs/arts/questions.md\"\n"
+                          "design_ticket_regex = '\\bUX-\\d+\\b'\n"), encoding="utf-8")
+        te.clear_caches()
+        tracker = self.root / "docs" / "arts" / "questions.md"
+        tracker.write_text("| Ticket | Item | Priority | Blocks | Status (2026-01-01) |\n|---|---|---|---|---|\n\nnotes\n",
+                           encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "tracker")
+        tracker.write_text(tracker.read_text(encoding="utf-8") + "someone else's line\n", encoding="utf-8")
+
+        code, res = self.halt("--asked-of", "external")
+        self.assertEqual(code, 2, res)
+        self.assertIn("--external-ticket", res["message"])
+        code, res = self.halt("--asked-of", "external", "--external-ticket", "UX-5", "--external-item", "Q1 stall")
+        self.assertEqual(code, 0, res)
+        committed = git(self.root, "show", "HEAD:docs/arts/questions.md")
+        self.assertIn("[UX-5] | Q1 stall | Medium | 1-2 ships the interims, ⚠️ |", committed)
+        self.assertNotIn("someone else's line", committed)
+        log = git(self.root, "show", "HEAD:docs/arts/auto-dev-failures.md")
+        self.assertIn("- asked_of: external", log)
+        self.assertIn("- external_ticket: UX-5", log)
+
+        code, res = self.resume("1-2")
+        self.assertEqual(code, 1)
+        self.assertIn("design owner's part is open: UX-5 reads", res["message"])
+        tracker.write_text(tracker.read_text(encoding="utf-8").replace("⏳ To Do", "✅ Done"), encoding="utf-8")
+        code, res = self.resume("1-2")
+        self.assertEqual(code, 0, res)
+        self.assertEqual(res["row"], "ready-for-dev")
+
     def test_line_break_refused_before_any_step(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):

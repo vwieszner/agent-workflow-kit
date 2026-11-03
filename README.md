@@ -5,13 +5,14 @@ A portable, spec-driven, human-gated development workflow for coding agents. It 
 
 | Part | What you get |
 |---|---|
-| Story pipeline | `parallel-dev-wave` → `land-story`: one isolated slot per story (a git worktree, plus an isolated compose stack if you want one), tests-first implementation with effort-escalated `story-impl` variants and context-cap hand-offs, layered review, owner triage, a close-out commit, `story-rebase`, `story-diagnose` for a failing pre-merge gate, `story-propagate` (propose before the merge checkpoint, apply after the merge), owner-approved merge in a land window (land lease + serial merge train, the train branch gated while waiting), post-merge smoke, cleanup. `sprint-next` answers "what's next?". |
-| Unattended loop | `auto-dev-loop`: the same pipeline without human checkpoints, run one phase per fresh headless session by `auto_dev_driver.py` (`start` / `list` / `stop`) and watched with `auto-dev-run`. The next story comes from `milestone-blockers` (map refresh via `milestone-map-refresh`). A halt keeps the worktree and stack; `resume_halted.py` resumes it. Every operation it is pre-authorized for is listed explicitly. |
+| Story pipeline | `parallel-dev-wave` → `land-story`: one isolated slot per story (a git worktree, plus an isolated compose stack if you want one), tests-first implementation with effort-escalated `story-impl` variants and context-cap hand-offs, layered review, owner triage, a close-out commit, `story-rebase`, `story-diagnose` for a failing pre-merge gate, `story-propagate` (propose before the merge checkpoint, apply after the merge), owner-approved merge in a land window (land lease + serial merge train, the train branch gated while waiting), an optional profile leg (an extra gate leg under another serving profile, due every N merges), post-merge smoke, cleanup. `sprint-next` answers "what's next?". |
+| Unattended loop | `auto-dev-loop`: the same pipeline without human checkpoints, run one phase per fresh headless session by `auto_dev_driver.py` (`start` / `list` / `stop`) and watched with `auto-dev-run`. The next story comes from `milestone-blockers` (map refresh via `milestone-map-refresh`). A halt keeps the worktree and stack; `resume_halted.py` resumes it. The control room (`control_room.py`, localhost) shows the board, the attention queue and the driver runs, and starts or stops runs; `auto_dev_metrics.py compare` compares driver configurations. Every operation it is pre-authorized for is listed explicitly. |
 | Review | `layered-review`: typed layers (`blind-hunter`, `edge-case-hunter`, `verification-gap`, `acceptance-auditor`), execution stages (`ui-verifier` on a UI profile, `pbt-writer` property tests, `test-adequacy` mutation testing), `findings-verifier` verification (3-vote majority in auto mode), `repro-writer` failing tests, rendered findings files with halted-round carry-over and a close-out loop; `findings-evaluator` (auto-dev-loop only). Runs as a Claude Code Workflow (`workflows/review.js`) or, elsewhere, through `workflow_replay.mjs` (Node ≥ 18). |
 | Guards | Hooks that block force-push, `--no-verify`, host installs, configured forbidden commands, raw process kills (`kill_owned.py` with a hook-issued token instead) and PowerShell commits. They also enforce the review preamble and the no-iterate dispatch phrasing, the phase gates (spec approved → impl; merge approved + pre-merge gate + land lease → land), nested-dispatch edges, story agents writing only in their worktree, review path confinement (the blind layer reads only its diff; review agents read the story tree, not the main checkout or library source; repro writers write only untracked repro tests; reports wait until every diff line is read), graph-query hygiene and read-only database MCPs. |
 | Learning loop | A per-turn session journal (with subagent liveness facts) feeds `retro` (`retro_digest.py` first), which writes proposals; `curate` checks drift (`proposal_drift.py`) and promotes them with owner approval into skills, agents, rules, scripts or memory. A failed background analyst run is logged to `.workflow/state/retro-launches.jsonl` and reported at the next session start. |
-| Harness ops | `harness-review` with `harness_metrics.py`, `session_cost_report.py`, `denial_samples.py`, `transcript_calls.py`, `journal_grep.py`, `review_precision.py`. |
-| Debugging | `flaky-test-hunter`, `hang-diagnoser`, `trace-port-traffic`, `run-tests`; `proc_scan.py` / `kill_owned.py` (owned process kills), `gate_campaign.py`, `host_cpu_load.py`, `pw_failure_summary.py`. |
+| Design owner | Optional: `design-ticket`, `design-sync`, `ui-design-compare`, `ui-profile`, `ui-seed`; `tracker.py` (Jira REST or a tracker MCP), `docs_mirror.py` (Confluence REST or MCP), `design_library.py` + `design_extract.js` + `design_assets.py` (Figma REST or MCP), `token_doc_check.py`, `design_tokens.py`, `snapshot_update.py`, `ui_gap_owner.py`. Every step says SKIPPED when unconfigured. |
+| Harness ops | `harness-review` with `story_state.py` (the read model), `auto_dev_metrics.py`, `harness_metrics.py`, `session_cost_report.py`, `denial_samples.py`, `transcript_calls.py`, `journal_grep.py`, `review_precision.py`. |
+| Debugging | `flaky-test-hunter`, `hang-diagnoser`, `trace-port-traffic`, `run-tests`; `proc_scan.py` / `kill_owned.py` (owned process kills), `gate_campaign.py`, `gate_sampler.py`, `host_cpu_load.py`, `pw_failure_summary.py`. |
 | Working rules | `AGENTS.md` plus `rules/` and the `rules-*` skills: never guess, root cause before fix, no quality reduction, surgical changes, off-task work, source-of-truth discipline, verification evidence, harness readers, and the rest. |
 | Vendored BMad | `create-story`, `advanced-elicitation` (MIT — see `vendor/bmad/NOTICE.md`); the edge-case-hunter and verification-gap review prompts (MIT — `skills/layered-review/review-prompts/NOTICE.md`). |
 
@@ -67,7 +68,7 @@ Edit `.workflow/config.toml`. Every key is documented inline. The minimum for a 
    prose only.
 6. Optional: `graph.tool`, `paths.quality_bar_doc` (enables the triage bar gate), `[milestones]`
    for `milestone-blockers` / `auto-dev-loop`, `[review]` UI/mutation/property stages and
-   `browser.mcp_server` for the ui-verifier, `[tests] scoped_legs`, `[path_rules]`, `[static_checks]`.
+   `browser.mcp_server` for the ui-verifier, `[tests] scoped_legs`, `[path_rules]`, `[static_checks]`, `[profiles]` / `[profile_leg]` / `[sampler]` for a gate that switches serving profiles, `[design]` / `[tracker]` / `[docs_mirror]` for a design owner, `[control_room]`.
 
 Then initialize the slot registry and check the config:
 
@@ -88,6 +89,9 @@ uv run --no-project .workflow/scripts/wfconfig.py ports 1
 | "run the autonomous loop" | `auto-dev-loop` |
 | "start a driver run" | `auto-dev-run` |
 | "harness review" | `harness-review` |
+| "file the design questions for story 1-2" | `design-ticket` |
+| "the designer answered" / "sync the design" | `design-sync` |
+| open the control room | `uv run --no-project .workflow/scripts/control_room.py` |
 | "review this diff" | `layered-review` |
 | `/retro`, then `/curate` | the learning loop |
 
@@ -132,9 +136,18 @@ python3 -m unittest discover -s agent-workflow-kit/hooks/tests -p 'test_*.py'
   OpenCode: no init check, no cost, the phase line read from the whole output. Its Claude path was
   tested with a fake `claude` CLI only. Without psutil the watchdog cannot kill a stuck session's
   descendants.
-- **Not ported from the source harness:** a Windows Terminal control-room dashboard, the per-story
-  state read model behind it, the configuration-comparison metrics, and gate CPU/profile samplers
-  tied to one stack.
+- **Live services and backends not exercised:** the Jira REST backend (`tracker.py`), the Confluence
+  REST fetch (`docs_mirror.py --fetch`, `design_assets.py`), the Figma REST mode and the MCP flows of
+  `design_library.py` / `design_page_renders.py` / `design_assets.py` ran only against fakes.
+  `docs_mirror.py --fetch` mirrors the REST `storage` body (XHTML), not markdown; a mirror is never
+  compared across formats.
+- **Serving profiles:** `gate_profile.py` and `gate_sampler.py` were tested with a fake compose/engine;
+  the profile switch and the container `/proc` reading have not run against a live stack.
+- **Control room:** the launch backends ran only against fakes (no live Windows Terminal, tmux,
+  `claude` or `opencode` start). Under OpenCode the read model's `sessions` section reads
+  "unavailable" unless `config: story_state.sessions_cmd` names a command printing the documented
+  JSON; `opencode --session <id>` resume is untested; running-agent attribution reads Claude Code
+  subagent metadata, under OpenCode only the journal's agent facts.
 - `trace_port.py` and the Docker paths of the lifecycle scripts have not been run against a live
   stack. They were tested with `stack.runtime = "none"` and a fake compose CLI, on macOS without
   psutil.

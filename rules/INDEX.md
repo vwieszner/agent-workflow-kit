@@ -52,6 +52,7 @@ them with the skill tool first.
 | `rules-comment-discipline` | Code comments carry invariant and mechanism only. |
 | `rules-test-runs` | How story agents run tests (one scoped invocation per round, recorded green). |
 | `rules-testing` | Test-writing rules for agents that write tests. |
+| `ui-seed` | A MISSING UI state becomes a seed AC or a question; seed conventions (`config: ui.seed_*`). |
 
 ## Use
 - `AGENTS.md` carries the short form of every rule; the file here is the full rule. When a rule blocks

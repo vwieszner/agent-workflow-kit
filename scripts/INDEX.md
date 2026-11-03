@@ -52,13 +52,16 @@ exit codes.
 | `branch_overlap.py` | Files a branch and its base both touched (OVERLAP) and predicted conflicts; before every story-rebase dispatch. |
 | `land_lease.py` | The land lease (`acquire [--wait-minutes N] \| release \| holds \| status`). |
 | `merge_train.py` | Serial merge train (`wait \| build \| settle \| home \| status`); gates the train branch while a story waits in the lease line. |
-| `log_failure.py` | Atomic append to the autonomous loop's permanent-failure log. |
+| `log_failure.py` | Atomic append to the autonomous loop's permanent-failure log (`--asked-of`, `--external-ticket`). |
 | `run_scoped_tests.py` | Scoped run: default leg (`config: tests.scoped_cmd`), named legs (`--leg NAME=VALUE`), host script tests (`--scripts`), `--require-synced`; `--record <id> <phase>` writes the GREEN line with its `code-tree`. |
-| `run_full_suite.py` | The full gate: preflight, schema-drift + pre-phases, concurrent legs, post-phases; one gate per stack (first-come-first-served line); `--record` (GREEN line, approval withdrawn on red while holding the lease, exit 75 = not run); `--train` gates the train branch; `--hold-lock-for reset-test-dbs\|land-merge`. |
+| `run_full_suite.py` | The full gate: preflight, schema-drift + pre-phases, concurrent legs, post-phases; one gate per stack (first-come-first-served line); `--record` (GREEN line, approval withdrawn on red while holding the lease, exit 75 = not run); `--train` gates the train branch; `--profile-leg` runs the profile leg alone under its profile (the stack returned to its resting profile; `RESTORE: FAILED` fails the gate; a green run resets the due count); `--hold-lock-for reset-test-dbs\|land-merge`. |
 | `static_checks.py` | Config-driven static checks (`config: static_checks.tools`) on changed or all files. 0 clean, 1 blocking, 2 infra. |
 | `gate_campaign.py` | K-consecutive full-gate campaign on a story stack; stops at the first red gate (1), over-budget wall (2), forbidden log line (3). |
 | `host_cpu_load.py` | Host CPU load generator (N busy processes, hard stop + stop-file) for proving timing budgets under load. |
 | `pw_failure_summary.py` | Summarise Playwright trace.zip failures: assertion, actions, failing HTTP, console errors. |
+| `profile_leg.py` | The profile leg's merge counter: `due [--every N]` — 0 not due, 1 due (prints the `--profile-leg` command), 2 cannot tell, 3 not configured (SKIPPED); green runs recorded in `.workflow/state/<config: profile_leg.state_file>`. |
+| `gate_profile.py` | Switch a gate stack between named serving profiles (`config: profiles`): drain → recreate → ready → verify; `ensure` switches only on a mismatch. `status \| ensure <profile> \| rest [--story-id]`; 0 ok, 1 not in profile / switch failed, 2 config. |
+| `gate_sampler.py` | Load and probe sampler for a gate run (`sample` / `summarize [--check]`): VM load + CPU split, per-container cores and block I/O, `config: sampler.probes`; budgets from `config: sampler.load_budget`. |
 
 ## Review pipeline
 
@@ -83,10 +86,42 @@ exit codes.
 | `auto_dev_guard.py` | Keep-halted rules for auto-dev-loop sessions (`shell_check`, `merge_refusal`, `mark_from_payload`). Library. |
 | `auto_dev_audit.py` | Post-session audit of the story a driver session drove. |
 | `auto_dev_run_report.py` | Report one driver run from its log, sessions file and session streams. |
-| `halt_release.py` | One-command halt-and-release: keep the work, release the slot, commit only its own bookkeeping. |
-| `resume_halted.py` | Resume a halted story: archive its failure entries with the ruling, remove them, row → ready-for-dev. |
+| `halt_release.py` | One-command halt-and-release: keep the work, release the slot, commit only its own bookkeeping; `--asked-of owner\|external\|both` (required), `--external-ticket`, `--external-item` (tracker step). |
+| `resume_halted.py` | Resume a halted story: archive its failure entries with the ruling, remove them, row → ready-for-dev; refuses while the design owner's ticket is open. |
 | `milestone_map_check.py` | Mechanical lists of milestone-blockers Steps 2/2b/2d over the dependency map (read-only). |
 | `_bookkeeping.py` | Internal: failure-log parser and own-change commit on the base branch. |
+| `auto_dev_metrics.py` | Quality, cost and time per driver run (`run [<id>\|latest]`) and across configuration fingerprints (`compare`); `--cost cached\|live`, `--json`. 0 printed, 2 usage/no run. |
+
+## Control room and read model
+
+| Script | Purpose |
+|---|---|
+| `story_state.py` | One JSON snapshot of every in-flight story (slot, worktree, stack, position, record, artifacts, git, agents, cost, driver runs, sessions) and the attention queue (what waits on the owner or the design owner); `--story`, `--attention`, `--no-cost`. Read-only. 0 printed, 2 usage/no main checkout. |
+| `control_room.py` | Localhost web control room (127.0.0.1 only): board, story detail, attention queue, driver runs, metrics; start/stop a driver run, open a session in a terminal, start a story session. `--port` (default `config: control_room.port`). |
+| `control_room_launch.py` | The control room's side effects: window backends (`config: control_room.launcher`: Windows Terminal, tmux, background) and story-session starts with `config: loop.driver_tool`. Library. |
+| `control_room_views.py` | The control room's HTML, pure functions of the documents. Library. |
+| `control_room_static/` | Vendored htmx 2.0.4 (0BSD, see its VENDOR.md) and the control room's stylesheet. |
+
+## Design owner and design source (optional; each step SKIPPED when unconfigured)
+
+| Script | Purpose |
+|---|---|
+| `design_ticket.py` | Deterministic parts of filing a story's design-owner questions: `label`, `render`, `tracker-row`, `commit-tracker`, `mark-spec`. 0 ok, 1 refusal, 2 usage. |
+| `tracker.py` | Issue-tracker calls behind one interface (`config: tracker.backend`: jira REST, mcp, none): `search`, `create`, `comment`, `comments`. 0, 1 tracker error, 2 config/credentials, 3 SKIPPED. |
+| `tracker_digest.py` | Digest a tracker search result (REST file or MCP result, `--session`): one line per issue, new comments since the last sync. 0, 1 more pages, 2 bad input. |
+| `docs_mirror.py` | Keep the read-only mirror of the external specification page (MCP result, `--session`, or `--fetch` REST; `--init`): version gate, section summary, diff file. 0, 1 drift at same version, 2 bad input, 3 SKIPPED. |
+| `token_doc_check.py` | Compare the specification's token tables with the design token export (MISMATCH / MISSING / EXPORT-ONLY). 0, 1 differences, 2 format changed, 3 SKIPPED. |
+| `design_library.py` | Build the design library (REST or MCP transcripts): INDEX, value sheets, frame maps, screen values, flows, tokens, crops; `--changes`, `--plan`, `--accept-fingerprints`. PEP 723 pillow (crops only). 0, 3 SKIPPED. |
+| `design_assets.py` | Rebuild the design intake's uncommitted binary assets: one PNG render per manifest frame and the docs-page image groups (`attachments.groups`, masters kept). PEP 723 pillow (resizing). 0 written, 1 nothing, 2 network/HTTP, 3 SKIPPED. |
+| `design_extract.js` | Design-tool plugin-API extractor pasted into the design MCP's plugin-code call (`sizeNodes`, `dumpNodes`, `frameMap`, `fingerprints`, `stylesDump`); not run by Python. |
+| `design_manifest.example.json` | Example design manifest (`config: design.manifest`). |
+| `design_page_renders.py` | Save the design MCP's page-render asset URLs into `<library>/renders/_pages/`. 0, 1 refused/failed, 3 SKIPPED. |
+| `design_instances.py` | Every drawn instance of one library component across the frame maps. 0, 2 no build, 3 SKIPPED. |
+| `design_context.py` | Convert a design-context tool result into `<intake>/design-context/<slug>.md` with a provenance header. 0, 3 SKIPPED. |
+| `design_tokens.py` | `export`: reassemble the token export from transcript chunks; `build`: run the project's token build in a story stack and copy the output back. 0, 3 SKIPPED. |
+| `snapshot_update.py` | Regenerate a configured test snapshot in a story stack and copy it back (`config: design.snapshots`). 0, 1 still failing, 2 refused/infra, 3 SKIPPED. |
+| `ui_gap_owner.py` | Which story spec or epic owns each UI string, with sprint status; REGRESSION-CANDIDATE for done stories. |
+| `_design.py` | Internal: design-question tracker table, ticket key regex, design-owner tag. |
 
 ## Learning loop and harness ops
 

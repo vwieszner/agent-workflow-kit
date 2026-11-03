@@ -6,8 +6,42 @@
     "screens_file_key": "<screens file key>",
     "render_scale": 1,
     "frames": [
-      {"slug": "dashboard-empty", "node": "10:290", "ticket": "<optional ticket key>"},
-      {"slug": "dashboard-populated", "node": "668:3199"}
+      {
+        "slug": "dashboard-empty",
+        "node": "10:290",
+        "ticket": "<optional ticket key>"
+      },
+      {
+        "slug": "dashboard-populated",
+        "node": "668:3199"
+      }
+    ]
+  },
+  "attachments": {
+    "_note": "Optional: docs-page images design_assets.py downloads. mode newest = the latest attachment of each listed page; all = every attachment of one page, named <prefix>-NN.",
+    "groups": [
+      {
+        "dir": "portraits",
+        "mode": "newest",
+        "pages": [
+          {
+            "slug": "<slug>",
+            "page": "<page id>"
+          }
+        ],
+        "max_edge": 768,
+        "format": "jpeg",
+        "quality": 85
+      },
+      {
+        "dir": "backdrops",
+        "mode": "all",
+        "page": "<page id>",
+        "prefix": "backdrop",
+        "max_edge": 1600,
+        "format": "jpeg",
+        "quality": 85
+      }
     ]
   }
 }

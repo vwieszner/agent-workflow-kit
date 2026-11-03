@@ -267,6 +267,10 @@ editing it. **In a story slot, query only the slot's graph project** (from
   marker. E2E runs have runner retries disabled — a retry hides the failure.
 - **E2E and browser work:** `.workflow/rules/e2e-debugging-protocol.md`,
   `.workflow/rules/browser-interaction.md`.
+- **Serving profiles** (when `config: profiles.gate` is set): the per-merge gate runs under that
+  profile; the land window runs `profile_leg.py due` after `merge_train.py home` and adds
+  `--profile-leg` to its gate when it exits 1 — for every story, exempt ones included. Never switch a
+  stack's profile with a bare compose command; use `gate_profile.py ensure` / `rest`.
 - **Path rules.** Path-scoped rule files (`config: path_rules.dir`) load only for files under the
   project root; story agents working in slot worktrees get `config: path_rules.names` injected at start.
 
@@ -296,11 +300,25 @@ never the whole findings file.
 in the lease's line its train branch is gated (`merge_train.py`). Never wait on the owner while
 holding the lease: a question to the owner releases it first (`land_lease.py release <id>`).
 
+**Design owner** (when `config: design.question_tag` is set). Questions about design values, undrawn
+states, documentation-vs-design contradictions and screen behaviour belong to the design owner
+(`config: design.owner_role`), not the owner: mark them `[OPEN-Q <n>] (<tag>)`, ship an interim marked
+⚠️, and file them with the `design-ticket` skill (one tracker ticket per story; `design_ticket.py`
+writes the tracker row and rewrites the markers). The `design-sync` skill reconciles their answers, the
+specification mirror and the design library, and routes each ruling to the stories it affects. A halt
+that waits on them is `--asked-of external|both` with the ticket; `resume_halted.py` refuses until the
+ticket's tracker row reads done. Tracker, docs and design-source credentials come only from the
+environment variables the config names (`config: tracker.user_env` / `token_env`,
+`config: design.token_env`); never write a token into a file.
+
 **Autonomous loop.** `auto-dev-loop` (driven one phase per session by
 `.workflow/scripts/auto_dev_driver.py`, observed with `auto-dev-run`) runs without human gates under
 its own pre-authorized list. A halted story keeps its branch, worktree and stack; only the owner
 resumes it (`resume_halted.py <id> --ruling '…'`) or discards it (`cleanup_story_stack.py <id>`). In an
 auto-dev session the `auto_dev_keep` guard denies removing a story's worktree, branch or volumes.
+Halted-story checks (parallel-dev-wave, auto-dev-loop, `sprint-next`) read the `blocked-row` /
+`driver-halt` entries of `.workflow/scripts/story_state.py --attention`; a failed source is never
+"not halted".
 
 **Post-merge regression gate.** After every merge, invoke the `post-merge-smoke` skill. Every service
 in `config: smoke.services` must be running with no fresh errors. Pre-existing baseline failures are

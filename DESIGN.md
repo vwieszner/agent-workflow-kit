@@ -181,6 +181,9 @@ Guards are **fail-open on internal error** (a crashing guard must not brick the 
   with the draft beside it as `<kind>-<slug>.draft.<ext>`.
 - Story setup: `.workflow/state/story-setup/<stack>.{json,log,graph_project}`.
 - Locks: `.workflow/state/locks/`.
+- Control room: `.workflow/state/control-room/` (`launches.jsonl`, launch output files, `launch-settings.json`).
+- Metrics cost cache: `.workflow/state/auto-dev-metrics/cost/<story>.json`.
+- Profile leg: `.workflow/state/<config: profile_leg.state_file>` (green runs; the due counter).
 - Slot registry / sprint status / specs: tracked docs at `config: paths.*` (committed).
 
 ## 9. Generalization rules (how sources were ported)

@@ -51,7 +51,7 @@ project_context = ""
 # Optional external-owner (e.g. designer) question tracker: story_research_pack / story-spec /
 # parallel-dev-wave. "" → that section SKIPPED.
 design_questions = ""             # e.g. "docs/planning-artifacts/design-questions.md"
-design_ticket_regex = "\\b[A-Z][A-Z0-9]+-\\d+\\b"   # ticket keys in that tracker
+design_ticket_regex = "\\b[A-Z][A-Z0-9]+-\\d+\\b"   # ticket keys in that tracker (should match config: tracker.project_key keys)
 # rules-defer: open rows for deferred product scope no not-done story covers ("" → a defer goes to the owner).
 product_backlog = ""
 # harness-review: the ranked harness backlog and the frozen baseline it is measured against.
@@ -209,6 +209,9 @@ credentials_source = ""           # where valid test credentials are defined; ne
 # Frontend source prefixes: story_record.py `reach` (ui-state-reach trigger). [] → reach SKIPPED.
 frontend_src_prefixes = []        # e.g. ["web/src/"]
 frontend_test_regex = "\\.(?:test|spec)\\.[jt]sx?$"   # files under those prefixes that are tests
+seed_module = ""                  # the project's UI-state seed module (ui-seed skill); "" → MISSING states become questions
+seed_tests = ""                   # its tests
+seed_rules = ""                   # optional doc of project seed conventions (reserved id ranges, UI flags in story stacks)
 
 [schema]
 # Pre-production single-migration policy. true → no new migration files; edit the initial
@@ -519,6 +522,119 @@ tokens = 300000                   # soft context cap after which context_cap.py 
 # format = "pyright-json"         # pyright-json | eslint-json | exit-code
 # blocking_rules = ["reportUndefinedVariable", "reportMissingImports"]
 tools = []
+
+[design]
+# The external design owner (a designer, a UX lead): their questions are not the owner's to rule.
+# Everything here is optional; an unset path makes its step print SKIPPED.
+owner_role = ""                   # display name of the role in prose, e.g. "the designer"; "" → "the design owner"
+question_tag = ""                 # their spec-marker tag `[OPEN-Q n] (<tag>)`; must also be in spec.external_question_tags; "" → first external tag, none → no design owner
+done_marker = "✅"                # a design-question tracker row whose Status starts with this is answered
+precedence = ""                   # precedence line in the library build's screen sheets; "" → ticket answer > master > frame > intake extract > specification page
+manifest = ""                     # design manifest JSON (file keys, frames, docs-page image groups); example .workflow/scripts/design_manifest.example.json
+intake_dir = ""                   # design intake root: design-context/ (design_context.py), assets/ + assets-master/ (design_assets.py)
+library_dir = ""                  # design library build (design_library.py: INDEX.md, sets/, frame-map/, frames/, raw/, renders/)
+token_env = "FIGMA_ACCESS_TOKEN"  # env var (or repo .env key) holding the design source REST token; never stored
+render_url_regex = "^https://www\\.figma\\.com/api/mcp/asset/[0-9a-f-]+\\.png$"   # design_page_renders.py accepted asset URLs
+context_note = ""                 # styling rule printed in design-context headers
+tokens_export = ""                # token export JSON written by design_tokens.py export (read by token_doc_check.py)
+# design_tokens.py build: { service, cmd = [argv], inputs = [[worktree path, container path]], copy_back = [[worktree dir, container dir]] }; {} → SKIPPED
+tokens_build = {}
+token_doc = ""                    # doc holding the token tables (default: docs_mirror.mirror)
+token_doc_start = ""              # heading line that starts the token section ("" → whole doc)
+token_doc_end = ""                # first heading line after it that ends the section
+token_table_prefixes = [["radius/", "radius table"], ["space/", "spacing table"]]   # token prefix → table name; others → "colour table"
+token_required_tables = ["colour table", "text style", "effect style"]             # tables that must match ≥1 row (else exit 2: format changed)
+token_semantic_collection = "Semantic"                                             # export collection whose unnamed variables are EXPORT-ONLY
+# snapshot_update.py: [{ name, service, test, update_cmd = [argv], container_path, worktree_path, summary_regex? }]; [] → SKIPPED
+snapshots = []
+
+[tracker]
+# Issue tracker for the design owner's tickets (design-ticket, design-sync, tracker.py).
+backend = "none"                  # "jira" (REST) | "mcp" (the tracker MCP tools below) | "none"
+site = ""                         # e.g. "https://example.atlassian.net"
+project_key = ""
+issue_type = "Task"
+priority = "Medium"
+assignee = ""                     # the design owner's account id (new tickets)
+labels = ["design-needed"]        # labels on every new ticket (+ the story label)
+story_label_prefix = "story-"     # story label = prefix + id ("." → "-")
+story_query = 'project = {project_key} AND labels = "{label}"'   # search for a story's ticket
+summary_prefix = "[UX]"
+done_when = ""                    # ticket "Done when" text; "" → "Each question is answered on this ticket."
+browse_url = ""                   # ticket link template ({site}, {key}); "" → {site}/browse/{key}
+user_env = "TRACKER_USER"         # env var: account email (REST basic auth); never stored
+token_env = "TRACKER_TOKEN"       # env var: API token; never stored
+mcp_tools = {}                    # backend "mcp": { search = "<tool>", create = "<tool>", comment = "<tool>", comments = "<tool>" }
+mcp_search_result_glob = "mcp-*search*Issues*-*.txt"   # tracker_digest.py --session: the search tool's result files
+
+[docs_mirror]
+# Read-only repo mirror of the external specification page (docs_mirror.py, token_doc_check.py, design_assets.py).
+backend = "none"                  # "confluence" | "none"
+site = ""                         # "" → tracker.site
+page_id = ""
+space = ""
+mirror = ""                       # repo path of the mirror file
+body_format = "storage"           # --fetch (REST v2) body format; the MCP result carries its own (markdown)
+user_env = ""                     # "" → tracker.user_env
+token_env = ""                    # "" → tracker.token_env
+mcp_tool = ""                     # the docs MCP page-content tool (prose only)
+mcp_result_glob = "mcp-*getConfluence*-*.txt"
+
+[profiles]
+# Named serving profiles a gate stack's services can run (gate_profile.py). "" → no profile handling:
+# every profile step is SKIPPED (announced) and `run_full_suite.py --profile-leg` is a config error.
+gate = ""                         # profile the per-merge legs need, e.g. "deterministic"
+story_resting = ""                # profile a story stack rests in ("" → gate); pair with stack.story_env so a bare `up` lands in it
+shared_resting = ""               # profile the shared stack rests in ("" → gate)
+gate_legs = []                    # legs that need the gate profile; [] → every configured leg
+services = []                     # services recreated on a switch; [] → stack.services
+env_var = ""                      # env var the switch sets to the profile's `value` (compose interpolates it)
+drain_cmd = ""                    # template polled before a switch until it exits 0 (no queued/running background work); "" → no drain
+drain_timeout_s = 180
+ready_timeout_s = 480
+switch_timeout_s = 1200
+probe_timeout_s = 180
+poll_s = 5
+# One table per profile:
+# [profiles.defs.deterministic]
+# value = "myapp.settings.gate"   # what env_var is set to
+# probe_cmd = "{compose} -p {stack} exec -T {service} ./print-profile"   # prints one `PROFILE {json}` line
+# expect = { EMBEDDER = "fake" }  # keys that JSON must carry with these values
+defs = {}
+
+[profile_leg]
+# Optional extra gate leg run alone under its own serving profile (`run_full_suite.py --profile-leg`),
+# due every `every` merges to git.base_branch since the last green run (profile_leg.py due).
+# profile or cmd "" → not configured: `due` exits 3 (SKIPPED), `--profile-leg` is a config error.
+profile = ""                      # a profiles.defs name, e.g. "real"
+label = "PROFILE-LEG"             # leg label in the gate summary
+cmd = ""                          # template; {specs} = the specs below joined by spaces
+specs = []                        # tests/specs the leg runs
+every = 10                        # merges between green runs before it is due
+state_file = "profile-leg-runs.jsonl"   # under .workflow/state/ of the main checkout
+
+[sampler]
+# gate_sampler.py: load and probe sampling during a gate run.
+reference_services = []           # quiet services whose container reads the VM (/proc), in preference order; [] → any container of the stack
+load_budget = 1.0                 # load1 above this x CPU count is an over-budget sample
+# { name, cmd, interval_s, timeout_s, slow_s }; cmd is a template ({stack} {slot} {worktree} + port vars).
+# A failure or a run slower than slow_s is over budget.
+probes = []
+
+[story_state]
+# Session-listing probe (argv list or string) printing a JSON array of session objects
+# (id, sessionId, name, kind, cwd, startedAt, state, status, waitingFor, pid).
+# "" → by loop.driver_tool: claude → `claude agents --json --all`; other tools → "unavailable".
+sessions_cmd = ""
+
+[control_room]
+port = 4747                       # control_room.py --port default (binds 127.0.0.1 only)
+# Window backend: "auto" (Windows Terminal on Windows when `wt` is on PATH, else tmux when on PATH,
+# else background) | "windows-terminal" | "tmux" | "background" (no terminal: attach/resume refused
+# with the command to run by hand; a story start runs detached, logs under .workflow/state/control-room/).
+launcher = "auto"
+start_prompt = "/parallel-dev-wave {story}"   # prompt a "start story session" sends; {story} filled
+opencode_start_cmd = "opencode run {prompt}"  # OpenCode story-start command ({prompt}, {story}); untested live
 
 [milestones]
 # One sub-table per milestone; the dependency-map schema is in the milestone-blockers skill.
