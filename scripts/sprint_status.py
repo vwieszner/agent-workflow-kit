@@ -20,17 +20,35 @@ Valid statuses: `config: sprint_status.statuses` (`--force` bypasses validation)
 
 Usage:
   uv run --no-project .workflow/scripts/sprint_status.py get <key-or-unique-prefix>
+  uv run --no-project .workflow/scripts/sprint_status.py get <key> <key> ... --brief   # `<key>: <status> | <note>` per key
   uv run --no-project .workflow/scripts/sprint_status.py set <key> done --note "MERGED (abc1234); slot 2 freed."
   uv run --no-project .workflow/scripts/sprint_status.py set <key> done --note "..." --history "Full close-out ..."
   uv run --no-project .workflow/scripts/sprint_status.py history <key>             # print note history
   uv run --no-project .workflow/scripts/sprint_status.py history <key> --append "Checkpoint 1 decisions: ..."
   uv run --no-project .workflow/scripts/sprint_status.py list --status ready-for-dev in-progress [--json]
+  uv run --no-project .workflow/scripts/sprint_status.py list --exclude-status done --exclude-epics --match "<regex>" --notes
   uv run --no-project .workflow/scripts/sprint_status.py touch --note "<key> started (slot 2)."
   uv run --no-project .workflow/scripts/sprint_status.py body | grep -n "<key>"
 
 Global options (before the subcommand): --path <file> (default: config), --history-dir <dir>
 (default: config when --path is not given, else a `story-history/` directory beside --path),
 --dry-run (print the JSON without writing).
+
+`set --note ''` (an empty or blank note) clears the row's comment; the note it replaces is archived.
+
+`history --append <key> "<text>"` (the key typed after `--append`) is accepted: when the positional
+names no story row (exact or prefix) and `--append`'s value names exactly one, the two swap and the
+JSON result carries `"argument_order": "swapped"`.
+
+`get` takes one or more keys and prints one line per key, in argument order: a JSON line by default,
+`<key>: <status> | <note>` with `--brief`. An unknown or ambiguous key prints its own error line and the
+remaining keys still print; the exit code is 2 when any key failed.
+
+`list` selects story rows: `--status` keeps the named statuses, `--exclude-status` drops them,
+`--exclude-epics` drops `epic-*` rows, `--match <regex>` keeps rows whose key or note matches
+(case-sensitive; a leading `(?i)` ignores case). It prints `<line>  <status> <key>` by default,
+`<key>: <status> | <note>` with `--notes`, and with `--json` every row carries its note. An invalid
+`--match` regex exits 2.
 
 Mutating subcommands print one JSON line on stdout and leave the file untouched on error.
 Exit codes: 0 ok; 2 error (JSON {"status":"error","message":...} on stdout).
@@ -102,22 +120,30 @@ def _find_row(lines: list[str], key: str):
     return None, None
 
 
-def _resolve_key(lines: list[str], key: str) -> str:
-    """Allow a unique prefix (e.g. '21-15') to stand in for the full story key."""
+def _lookup_key(lines: list[str], key: str) -> tuple[str | None, str]:
+    """(full key, "") for an exact key or a unique prefix (e.g. '21-15'); (None, reason) otherwise."""
     exact, _ = _find_row(lines, key)
     if exact is not None:
-        return key
+        return key, ""
     hits = []
     for line in lines:
         m = ROW_RE.match(line.rstrip("\n"))
         if m and m.group("key").startswith(key):
             hits.append(m.group("key"))
     if len(hits) == 1:
-        return hits[0]
+        return hits[0], ""
     if not hits:
-        _die(f"no story row matching {key!r}")
-    _die(f"{key!r} is ambiguous - matches {len(hits)}: {', '.join(sorted(hits)[:8])}")
-    raise AssertionError("unreachable")
+        return None, f"no story row matching {key!r}"
+    return None, f"{key!r} is ambiguous - matches {len(hits)}: {', '.join(sorted(hits)[:8])}"
+
+
+def _resolve_key(lines: list[str], key: str) -> str:
+    """Allow a unique prefix (e.g. '21-15') to stand in for the full story key."""
+    full, reason = _lookup_key(lines, key)
+    if full is None:
+        _die(reason)
+        raise AssertionError("unreachable")
+    return full
 
 
 def _write(path: Path, lines: list[str], dry_run: bool) -> None:
@@ -160,18 +186,25 @@ def _archive_note(hist_dir: Path, key: str, status: str, note: str, title: str, 
 
 def cmd_get(args, path: Path) -> int:
     lines = _read(path)
-    key = _resolve_key(lines, args.key)
-    idx, m = _find_row(lines, key)
-    assert idx is not None and m is not None  # _resolve_key already proved the row exists
-    note = (m.group("rest") or "").lstrip().lstrip("#").strip()
-    print(json.dumps({
-        "status": "ok",
-        "key": key,
-        "value": m.group("status"),
-        "line": idx + 1,
-        "note": note,
-    }))
-    return 0
+    failed = False
+    for wanted in args.keys:
+        key, reason = _lookup_key(lines, wanted)
+        if key is None:
+            failed = True
+            if args.brief:
+                print(f"{wanted}: ERROR | {reason}")
+            else:
+                print(json.dumps({"status": "error", "key": wanted, "message": reason}))
+            continue
+        idx, m = _find_row(lines, key)
+        assert idx is not None and m is not None  # _lookup_key already proved the row exists
+        note = (m.group("rest") or "").lstrip().lstrip("#").strip()
+        if args.brief:
+            print(f"{key}: {m.group('status')} | {note}")
+        else:
+            print(json.dumps({"status": "ok", "key": key, "value": m.group("status"),
+                              "line": idx + 1, "note": note}))
+    return 2 if failed else 0
 
 
 def cmd_set(args, path: Path) -> int:
@@ -199,7 +232,11 @@ def cmd_set(args, path: Path) -> int:
             args.history_dir, key, args.status, args.history,
             "detail recorded by `sprint_status.py set --history`", args.dry_run
         )
-    rest = f"  # {args.note.strip()}" if args.note is not None else (m.group("rest") or "")
+    if args.note is None:
+        rest = m.group("rest") or ""
+    else:  # an empty note clears the comment: the row ends at its status
+        text = args.note.strip()
+        rest = f"  # {text}" if text else ""
     lines[idx] = f"{m.group('indent')}{key}: {args.status}{rest}\n"
     _write(path, lines, args.dry_run)
     print(json.dumps({
@@ -216,6 +253,14 @@ def cmd_set(args, path: Path) -> int:
 
 def cmd_history(args, path: Path) -> int:
     lines = _read(path)
+    swapped = False
+    # `history --append <key> "<text>"`: argparse gave the key to --append and the text to `key`. Swap only when
+    # `key` names no row at all (an ambiguous prefix keeps its error) and --append names exactly one.
+    if args.append is not None and _lookup_key(lines, args.append)[0] is not None and not any(
+        m and m.group("key").startswith(args.key) for m in (ROW_RE.match(ln.rstrip("\n")) for ln in lines)
+    ):
+        args.key, args.append = args.append, args.key
+        swapped = True
     key = _resolve_key(lines, args.key)
     _idx, m = _find_row(lines, key)
     assert m is not None
@@ -224,7 +269,10 @@ def cmd_history(args, path: Path) -> int:
             args.history_dir, key, m.group("status"), args.append,
             "appended via `sprint_status.py history --append`", args.dry_run
         )
-        print(json.dumps({"status": "appended", "key": key, "history_file": hp, "dry_run": args.dry_run}))
+        result = {"status": "appended", "key": key, "history_file": hp, "dry_run": args.dry_run}
+        if swapped:
+            result["argument_order"] = "swapped"
+        print(json.dumps(result))
         return 0
     hp = _history_path(args.history_dir, key)
     if not hp.is_file():
@@ -271,6 +319,12 @@ def cmd_touch(args, path: Path) -> int:
 def cmd_list(args, path: Path) -> int:
     lines = _read(path)
     wanted = set(args.status or [])
+    unwanted = set(args.exclude_status or [])
+    try:
+        match = re.compile(args.match) if args.match else None
+    except re.error as exc:
+        _die(f"--match is not a valid regex: {exc}")
+        raise AssertionError("unreachable")
     rows = []
     for i, line in enumerate(lines):
         m = ROW_RE.match(line.rstrip("\n"))
@@ -278,14 +332,22 @@ def cmd_list(args, path: Path) -> int:
             continue
         if wanted and m.group("status") not in wanted:
             continue
+        if m.group("status") in unwanted:
+            continue
         if args.exclude_epics and m.group("key").startswith("epic-"):
             continue
-        rows.append({"key": m.group("key"), "status": m.group("status"), "line": i + 1})
+        note = (m.group("rest") or "").lstrip().lstrip("#").strip()
+        if match and not (match.search(m.group("key")) or match.search(note)):
+            continue
+        rows.append({"key": m.group("key"), "status": m.group("status"), "line": i + 1, "note": note})
     if args.json:
         print(json.dumps({"status": "ok", "count": len(rows), "rows": rows}))
     else:
         for r in rows:
-            print(f"{r['line']:>4}  {r['status']:<13} {r['key']}")
+            if args.notes:
+                print(f"{r['key']}: {r['status']} | {r['note']}")
+            else:
+                print(f"{r['line']:>4}  {r['status']:<13} {r['key']}")
         print(f"--- {len(rows)} row(s)", file=sys.stderr)
     return 0
 
@@ -311,14 +373,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    g = sub.add_parser("get", help="print one story row")
-    g.add_argument("key")
+    g = sub.add_parser("get", help="print one line per story row, in argument order")
+    g.add_argument("keys", nargs="+", metavar="key")
+    g.add_argument("--brief", action="store_true", help="print `<key>: <status> | <note>` instead of JSON")
     g.set_defaults(fn=cmd_get)
 
     s = sub.add_parser("set", help="set a story's status (and optionally replace its note)")
     s.add_argument("key")
     s.add_argument("status")
-    s.add_argument("--note", default=None, help=f"replace the trailing # note (max {cap} chars)")
+    s.add_argument("--note", default=None,
+                   help=f"replace the trailing # note (max {cap} chars); an empty note clears it")
     s.add_argument("--history", default=None, help="long-form detail appended to the story's history file")
     s.add_argument("--force", action="store_true", help="allow a status outside the configured set")
     s.set_defaults(fn=cmd_set)
@@ -333,9 +397,14 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--date", default=None, help="ISO date; defaults to today")
     t.set_defaults(fn=cmd_touch)
 
-    ls = sub.add_parser("list", help="list story rows, optionally filtered by status")
+    ls = sub.add_parser("list", help="list story rows, filtered by status, key or note")
     ls.add_argument("--status", nargs="*", default=None)
+    ls.add_argument("--exclude-status", nargs="+", default=None, metavar="STATUS",
+                    help="drop rows with these statuses")
     ls.add_argument("--exclude-epics", action="store_true")
+    ls.add_argument("--match", default=None, metavar="REGEX",
+                    help="keep rows whose key or note matches (case-sensitive; a leading (?i) ignores case)")
+    ls.add_argument("--notes", action="store_true", help="print `<key>: <status> | <note>`")
     ls.add_argument("--json", action="store_true")
     ls.set_defaults(fn=cmd_list)
 

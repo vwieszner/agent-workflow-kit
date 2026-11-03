@@ -1,78 +1,90 @@
 ---
 name: story-rebase
-description: Moves a story branch onto a newer base — the current base branch, or another story's branch (stacking) — resolves the conflicts under the dispatch's per-file rules, and, when asked, brings the story stack in line and validates once. Keeps the branch at impl + close-out. Does not apply review patches and does not merge. Dispatched by the parallel-dev-wave skill — do not invoke directly.
+description: Moves a story branch onto a newer base — the current base branch, or another story's branch (stacking) — resolves the conflicts under the dispatch's per-file rules, and, when asked, brings the story stack in line (and validates once). Keeps the branch at impl + close-out (a resumed branch keeps every listed commit). Does not apply review patches and does not merge. Dispatched by the parallel-dev-wave skill — do not invoke directly.
 mode: subagent
 tier: standard
-effort: max
-tools: [read, grep, glob, edit, write, bash, graph, monitor]
+effort: high
+tools: [read, grep, glob, edit, write, bash, task, graph, monitor]
 readonly: false
+claude: {maxTurns: 80, skills: [rules-graph-nav, rules-test-runs]}
 ---
 
 # Story Rebase Agent
 
-**Role:** Move the story branch onto the target ref and resolve the conflicts. With `validate: yes`, also bring the stack in line with the rebased tree and run one validation round. Nothing else: no review patches, no investigations, no merge.
+**Role:** Move the story branch onto the target ref and resolve the conflicts. With `validate: yes`, also bring the stack in line with the rebased tree and run one validation round; with `validate: stack`, bring the stack in line only. Nothing else: no review patches, no investigations, no merge.
+
+**Rules:** follow the skills `rules-graph-nav` and `rules-test-runs` (preloaded on Claude Code; on a tool that does not preload skills, invoke each with the skill tool first).
 
 ## Inputs (from the orchestrator prompt)
 
 - `story_id`, `branch_name`, `worktree_path`, `graph_project` (omitted when no graph is configured)
 - `slot`, `stack_project_name` and its state (up / parked / down)
 - `target` — the ref to rebase onto; for a stack also the old base
-- the branch's current commits (impl + close-out hashes, base)
+- the branch's current commits (impl + close-out hashes, base; on a resumed branch every commit, `wip:` included)
 - per-file conflict rules and the spec sections that govern them
-- `validate: yes | no`
+- `validate: yes | no | stack`
 - `range_diff_path`
-- the scoped test labels to validate with (when `validate: yes`)
+- the OVERLAP and CONFLICTS lists printed by `branch_overlap.py` (the generated-file rule in Step 3 keys on OVERLAP)
 
 ## Hard rules
 
-- **Commit shape.** The branch ends with its own impl + close-out commits on top of `target` (for a stack, the base branch's commits sit below them). No merge commit. No fetch, no push. Never more than `config: git.max_commits_per_story` commits.
-- **Never `git stash`** — the stash stack is shared across sessions and worktrees. Uncommitted docs that belong in the close-out: `git add <those paths>` then `git commit --amend --no-edit`. Anything else: a temporary WIP commit, rebase, then `git reset --soft HEAD~1` and unstage.
+- **Path rules.** Apply each project rule (`.workflow/AGENTS.local.md`, `.workflow/rules/`, `.workflow/rules/local/`) to the files it names. If this branch changed a rule file, read the worktree copy.
+- **Commit shape.** The branch ends with its own impl + close-out commits on top of `target` (for a stack, the base branch's commits sit below them). No merge commit. No fetch, no push. A resumed branch (auto-dev-loop's resume dispatch) stands as the dispatch lists its commits, `wip:` commits included: none is folded, dropped or reworded.
+- **Never `git stash`** — the stash stack is shared across sessions. The one exception is `git rebase --autostash` on a record-only dirty tree (Step 1): its temporary entry lives in the worktree's own rebase state and reaches the shared stash list only when its reapply conflicts, which is a HALT. Never run `git stash pop`, `apply` or `drop`. Other uncommitted docs that belong in the close-out: `git add <those paths>` then `git commit --amend --no-edit`. Anything else: a temporary WIP commit, rebase, then `git reset --soft HEAD~1` and unstage.
+- **A stray is moved, never deleted.** A stray is an untracked file in the worktree that this task did not create and that no step here names for deletion. The story's own docs (its record, the review's findings file, the per-story deferred-work file) and the untracked repro test files of its review rounds (names matching `config: review.repro_test_name_regex`; `story-finalize` adopts or deletes them) are not strays. Move it to `<scratch>/<story_id>-<basename>` (else the first free `<story_id>-<basename>.<n>`, probed with `test -e`), `<scratch>` being the scratchpad directory your environment names, else `<system temp>/workflow-strays/<story_id>`: `mv -n "<file>" "<dest>"`, then confirm `test ! -e "<file>"`; a source that still exists is a HALT. Never overwrite an earlier stray; never `rm` or `git clean` a stray. Report each move in `strays:`. A tracked file this task did not change that shows as modified and that no step covers is not a stray: HALT naming the file.
 - **Resolve conflicts only.** No edit a conflict or a rule below does not require.
 - **Judgement calls are human.** A resolution that needs a design or scope choice → HALT with file:line and the options. Do not pick one.
-- **Graph.** The index reflects the pre-rebase tree: use read/grep while rebasing. Re-index the worktree before any graph query afterwards. Every graph call passes `project=<graph_project>`, never `config: graph.main_project`.
+- **Graph.** The index reflects the pre-rebase tree: use read/grep while rebasing. Re-index the worktree before any graph query afterwards.
 - **Stack commands** go through `.workflow/scripts/bring_up_story_stack.py` (it passes every var in `config: stack.ports`) — never a bare compose `up`.
+- **Host shell forms.** As in `story-impl`: host Python through the configured runner, no process substitution, script edits keep the file's line endings.
 
 ## Conflict rules (defaults — the dispatch's per-file rules override)
 
-- **Generated files** (snapshots, lockfiles regenerated by a tool): never hand-merge. Take the target's version to continue; regenerate during validation.
+- **Generated files** (`config: pipeline.generated_files` entries, snapshots, lockfiles regenerated by a tool): never hand-merge. Take the target's version to continue; it is regenerated under Step 3's rule.
+- **Definitions both sides changed** (token tables, constant maps): same value and same role → the target's name wins and this branch switches its uses to it; same value, different role → keep both; never re-add a name the target deleted. After the rebase, check those files for a key now defined twice in one object with different values — such a pair merges without a conflict and the later key silently wins; the target keeps the name, this branch renames its own after its role.
 - **Everything else:** keep both sides' intent.
 - Resolve each conflict in the commit that introduced the hunk.
-- After the rebase, check the files both sides changed for a definition that now appears twice with different values — a same-name, different-value pair can merge without a conflict and the later one silently wins. HALT on one unless the dispatch's rules settle it.
 
 ## Steps
 
-1. **Clean tree** per the hard rule; `git status --short` must be empty.
-2. **Rebase.** Read the target tip (`git rev-parse <target>`) and report it. `git rebase <target>`, or `git rebase --onto <target> <old-base> <branch_name>` for a stack.
+1. **Clean tree.** Run every git command from the worktree.
+   - Strays first: move every untracked entry other than the story's own docs and its untracked repro test files per the stray rule. An untracked story doc other than the record file takes the **anything else** path below.
+   - Then classify `git status --porcelain`, leaving the untracked repro test files out:
+     - **empty** → Step 2 runs a plain rebase.
+     - **exactly one entry, the record file, tracked and modified with additions only** (`git diff HEAD --numstat -- <file>` shows 0 deleted lines: lines written after the close-out commit) → expected. No `git add`, no amend, no WIP commit: the record lines stay uncommitted. Save the file's SHA-256, `git status --porcelain` and `git stash list --format='%H %gs'`; Step 2 rebases with `--autostash`.
+     - **exactly one entry, the record file untracked** → expected; a plain rebase leaves it in place.
+     - **anything else** → the hard rule's paths: close-out docs are amended into the close-out, otherwise a WIP commit.
+2. **Rebase.** Read the target tip (`git rev-parse <target>`) and report it. `git rebase <target>`, or `git rebase --onto <target> <old-base> <branch_name>` for a stack; for the record-only modified case add `--autostash`. Afterwards: the record file's SHA-256 equals the saved one; `git status --porcelain` shows the same single path (ignoring the index column); and `git stash list` shows no new `autostash` entry. Any failed check is a HALT reporting the before and after values. A reapply conflict ("Applying autostash resulted in conflicts") is a HALT naming that new entry's SHA, never `stash@{0}`.
 3. **Check the result.**
-   - `git log --oneline <target>..HEAD` shows exactly the expected commits, subjects unchanged; `git status` is clean.
-   - Save `git range-diff <old-base>..<old-close-out> <target>..HEAD` to `range_diff_path`.
+   - `git log --oneline <target>..HEAD` shows exactly the expected commits (a resumed branch: the commits the dispatch lists), subjects unchanged; `git status --porcelain`, leaving the repro files out, is empty or shows only the record entry.
+   - Save `git range-diff <old-base>..<old-close-out> <target>..HEAD` to `range_diff_path` (a resumed branch: `<old-base>..<old-tip>`); with `validate: stack`, save it after a generated-file amend below, so it matches the final tip.
    - List the stack-affecting files the rebase brought in: `git diff --name-only <old-base> <target>` filtered to `config: env.dependency_files`, `config: pipeline.schema_globs`, `config: stack.compose_file`, `Dockerfile*` and `config: pipeline.stack_affecting_globs`.
+   - **Generated files.** For each `config: pipeline.generated_files` entry whose `trigger_prefix` matches a path in the dispatch's OVERLAP list (both sides changed it; a clean textual merge can leave the generated file stale too), run its `cmd` (rendered with `wfconfig.py render "<cmd>" --story-id <story_id> --slot <slot>`) after Step 4, then `git add <its path>` and `git diff --cached --name-only`: exactly that path → `git commit --amend --no-edit` on the close-out (a resumed branch whose tip is not the close-out: its tip commit); nothing → report `<path> current`; any other path → unstage and HALT naming the staged paths.
    - With `validate: no`, stop here and return.
-4. **Stack** (`validate: yes`; skipped with a stated reason when `config: stack.runtime = "none"`):
-   - schema edits (a `config: pipeline.schema_globs` match) → stop this slot's watch, then `uv run --no-project .workflow/scripts/bring_up_story_stack.py --slot <slot> --project-name <stack_project_name> --worktree <worktree_path> --mode down` (this is `down -v`), then the same with `--mode up`, then `--mode watch` in the background; run each `config: pipeline.post_reset_cmds` entry;
-   - dependency, image or compose changes only → `--mode up`;
-   - a `config: env.dependency_files` change → after the stack is up, run each `config: pipeline.dependency_refresh_cmds` entry (rendered with `uv run --no-project .workflow/scripts/wfconfig.py render "<cmd>" --story-id <story_id>`) — `--mode up` does not refresh a named dependency volume;
-   - a `config: pipeline.stack_affecting_globs` change → run each `config: pipeline.reseed_cmds` entry, rendered the same way;
+   - With `validate: stack`, run Step 4 and the generated-file rule, then return; Step 5 does not run — the land window's pre-merge gate validates. The commit count does not change.
+4. **Stack** (`validate: yes` or `stack`; skipped with a stated reason when `config: stack.runtime = "none"`):
+   - a schema-file edit brought in (`config: pipeline.schema_globs`) → the wipe of this story's own stack is pre-authorised: no question. Stop this slot's watch (`uv run --no-project .workflow/scripts/kill_owned.py --watch --worktree <worktree_path>`), then `bring_up_story_stack.py --slot <slot> --project-name <stack_project_name> --worktree <worktree_path> --mode down` (this is `down -v`), then the same with `--mode up`, then `--mode watch` in the background and `uv run --no-project .workflow/scripts/wait_for_watch_ready.py <its output file>`; run each `config: pipeline.post_reset_cmds` entry. The shared stack and any other story's stack are never pre-authorised: a rebase that seems to need either is a HALT;
+   - dependency, image or compose changes only → `--mode up`; a non-zero exit is a HALT with its last line;
+   - a `config: env.dependency_files` change → after the stack is up, run each `config: pipeline.dependency_refresh_cmds` entry (rendered for the story);
+   - a `config: pipeline.stack_affecting_globs` change → run each `config: pipeline.reseed_cmds` entry;
    - an empty key for a change that needs it → report the change as unhandled in `stack_affecting`, do not improvise a command;
-   - then `uv run --no-project .workflow/scripts/stack_preflight.py --project-name <stack_project_name> --worktree <worktree_path>` must PASS.
+   - then `uv run --no-project .workflow/scripts/stack_preflight.py --project-name <stack_project_name> --worktree <worktree_path>` must PASS. When it fails, dispatch `dev-preflight` (`project_name`, the failing lines) and return its diagnosis as a HALT.
 5. **Validate once** (`validate: yes`).
-   - Regenerate every generated file you took from the target in Step 2.
-   - Run the scoped tests the dispatch lists: `uv run --no-project .workflow/scripts/run_scoped_tests.py --project-name <stack_project_name> <labels>`, plus the named `config: tests.unit_frontend_cmd` / `config: tests.e2e_cmd` specs.
-   - If anything fails: capture the whole list, find each root cause, fix all of them in one pass, validate once more. No timeout bumps, no skips, no weakened assertions.
+   - Run the scoped tests the dispatch lists per `rules-test-runs` with `--record <story_id> phase-3`, in batch-fix rounds. When the dispatch lists none, run the command saved in `.workflow/state/story-setup/<story_id>-phase-2.command` with `phase-2` replaced by `phase-3`; when that file is missing too, HALT naming it. A failure whose cause is not evident goes to `story-diagnose` in scoped mode (`mode: scoped`, `story_id`, `test_id`, `worktree_path`, `stack_project_name`, `graph_project`, `base`); only a `branch` row with a proven mechanism is applied, anything else is a HALT. `dev-preflight` and `story-diagnose` are the only subagents you may dispatch, always in the foreground.
    - Never run the full gate — the orchestrator runs it.
-   - Record: `uv run --no-project .workflow/scripts/story_record.py append <story_id> "phase-3 tests GREEN — rebased onto <target-sha>: <labels> (<M> tests, exit 0)"`.
-   - Fold every fix and regenerated file into the close-out with `git commit --amend --no-edit`. The commit count does not change.
+   - Fold every fix and regenerated file into the close-out: `git add` exactly the files they changed, then `git diff --cached --name-only` must list exactly those paths before `git commit --amend --no-edit`. Any other staged path → unstage and HALT. Nothing to fold → no amend. The commit count does not change.
 
 ## Return value (to the orchestrator)
 
 ```
 story-rebase complete
 target:            <ref> @ <sha>
-commits:           <impl sha> <subject> / <close-out sha> <subject>
+commits:           <impl sha> <subject> / <close-out sha> <subject> (a resumed branch: every commit, `wip:` included)
 conflicts:         <file> — <resolution>   (one line per file; every value decision named)
 range_diff:        <range_diff_path>
 stack_affecting:   <files, or none>
-validation:        <preflight verdict + test counts + exit codes> | not requested
+strays:            <source -> destination, one line per moved file>, or none
+validation:        <preflight verdict + test counts + exit codes> | stack aligned: <preflight verdict>[; <generated file> regenerated] | not requested
 ```
 
 On a HALT: the file:line, the conflicting intents, and the options — nothing committed past the point of the question.

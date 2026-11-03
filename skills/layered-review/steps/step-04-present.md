@@ -2,11 +2,10 @@
 deferred_work_file: '' # set at runtime: <config: paths.deferred_work_dir>/story-<story_key>.md, or empty when no story key
 ---
 
-# Step 4: Present and Act (direct mode only)
+# Step 4: Present and Act
 
 ## RULES
 
-- Pipeline mode never reaches this step — the caller owns triage, patching and status.
 - When `{spec_file}` is set, write findings to the story file before offering action choices.
 - `decision_needed` findings are resolved before `patch` findings are handled.
 - No patch is applied without the owner's explicit numbered choice below.

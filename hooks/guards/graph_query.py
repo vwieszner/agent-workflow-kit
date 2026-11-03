@@ -15,6 +15,7 @@ Denies via JSON permissionDecision on stdout (exit 2 does not block MCP tools):
        (`<project>.db`). Skipped when the cache dir does not exist.
 
 Exempt tools (they fix or diagnose an unindexed state): `config: guards.graph_exempt_tools`.
+An effort variant (`story-impl-xhigh`) counts as its base agent (`agent_roles.base_role`).
 Fail open: no `project` argument, unknown agent, any unexpected error -> allow.
 """
 from __future__ import annotations
@@ -25,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _guardlib as g  # noqa: E402
+from agent_roles import base_role  # noqa: E402
 
 HOOK = "graph_query.py"
 DEFAULT_EXEMPT = ["index_repository", "list_projects", "delete_project", "index_status"]
@@ -62,9 +64,10 @@ def evaluate(payload: dict) -> int:
     main_project = str(g.cfg("graph.main_project", "") or "")
     slot_only = set(g.cfg_list("guards.slot_only_agents", ["story-impl", "story-finalize", "story-rebase", "story-diagnose"]))
     agent = payload.get("agent_type")
-    if not main_project and agent in slot_only:
+    role = base_role(agent)
+    if not main_project and role in slot_only:
         _note_g2_skipped(str(payload.get("session_id") or "nosession"))
-    if main_project and agent in slot_only and project == main_project:
+    if main_project and role in slot_only and project == main_project:
         return g.deny_json(
             f"[workflow-hook] {agent} runs inside a story worktree; project '{main_project}' "
             f"is the main checkout's graph, not your branch's — results would be plausible "

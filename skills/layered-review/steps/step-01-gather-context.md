@@ -2,8 +2,8 @@
 diff_output: '' # set at runtime
 spec_file: '' # set at runtime (path or empty)
 review_mode: '' # set at runtime: "full" or "no-spec"
-story_key: '' # set at runtime when discovered from sprint status or passed by the pipeline
-graph_project: '' # set at runtime (pipeline args) or empty
+story_key: '' # set at runtime when discovered from sprint status
+graph_project: '' # set at runtime or empty
 snapshot_mode: '' # set at runtime: "true" when the worktree is being mutated concurrently
 ---
 
@@ -13,7 +13,7 @@ snapshot_mode: '' # set at runtime: "true" when the worktree is being mutated co
 
 - The prompt that triggered this workflow IS the intent — not a hint.
 - Do not modify any files. This step is read-only.
-- Pipeline mode: take the diff range, spec path, story key and graph project from the args; skip every question below and do not HALT at the checkpoint.
+- This is direct mode. Pipeline mode (parallel-dev-wave, auto-dev-loop) never runs these steps: it runs workflow.md "Pipeline mode".
 
 ## INSTRUCTIONS
 
@@ -50,17 +50,15 @@ snapshot_mode: '' # set at runtime: "true" when the worktree is being mutated co
 
 5. If `{review_mode}` = `"full"` and `{spec_file}`'s frontmatter has a `context` field listing additional docs, load each one. Warn about any doc that cannot be found.
 
-6. **Graph project.** If `config: graph.tool` is `"none"`, set `{graph_project}` empty and state "graph navigation disabled (graph.tool = none)". Otherwise use the project named by the caller (a story slot's `graph_project`). Never use `config: graph.main_project` when reviewing a branch worktree — it indexes the main checkout, not the branch. If no project is known, leave it empty (layers fall back to grep/read).
+6. **Graph project.** If `config: graph.tool` is `"none"`, set `{graph_project}` empty and state "graph navigation disabled (graph.tool = none)". Otherwise use the slot's `graph_project` when reviewing a story worktree (`.workflow/state/story-setup/<stack>.graph_project`), or `config: graph.main_project` when reviewing the main checkout itself. Never use `config: graph.main_project` when reviewing a branch worktree — it indexes the main checkout, not the branch. If no project is known, leave it empty (layers fall back to grep/read).
 
 7. **Snapshot mode.** If another agent is concurrently mutating the worktree under review (e.g. `story-finalize` applying patches), set `{snapshot_mode}` = `"true"`: materialize each file under review with `git show <commit>:<path>` (plus the spec at that commit) into the scratch/state dir, and set `{graph_project}` empty — the graph index reflects the mutating tree. The layers have no shell, so the orchestrator does this materialization.
 
-8. Sanity check: if `{diff_output}` exceeds roughly 3000 lines, warn the owner and offer to chunk the review by file group.
-   - Chunk: agree on the first group, narrow `{diff_output}`, and list the remaining groups for follow-up runs.
-   - Decline: proceed with the full diff.
+8. Large diffs need no narrowing: Step 2 splits the diff into chunk files sized for the layers' reads.
 
 ### CHECKPOINT
 
-Present a summary: diff stats (files changed, lines added/removed), `{review_mode}`, loaded spec/context docs, `{graph_project}` (or "none"), `{snapshot_mode}`. Direct mode: HALT and wait for the owner's confirmation. Pipeline mode: print it and continue.
+Present a summary: diff stats (files changed, lines added/removed), `{review_mode}`, loaded spec/context docs, `{graph_project}` (or "none"), `{snapshot_mode}`. HALT and wait for the owner's confirmation.
 
 ## NEXT
 

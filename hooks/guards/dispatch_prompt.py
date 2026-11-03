@@ -20,6 +20,13 @@ Rules (exit 2 + stderr):
      A review dispatch passes only if the prompt contains `config: review.required_preamble`
      or one of: "do not (auto-)apply", "no auto-apply", "report findings only",
      "recommend (a) classification", "never (auto-)apply".
+
+An effort variant (`story-impl-xhigh`) is classified as its base agent (`agent_roles.base_role`).
+A review workflow spawns its typed layers outside the dispatch tool; this guard covers the
+dispatch-tool path of the same types (a re-verification, a fallback), the layers' read-only
+tool lists cover the workflow path.
+
+`check(payload)` returns the block message (or None) for in-process callers.
 """
 from __future__ import annotations
 
@@ -29,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _guardlib as g  # noqa: E402
+from agent_roles import base_role  # noqa: E402
 
 HOOK = "dispatch_prompt.py"
 
@@ -50,6 +58,7 @@ ITER_PATTERNS = [
 
 CODE_REVIEW_TRIGGERS = [
     r"(run|invoke|dispatch|use|perform|conduct|execute)\s+(the\s+)?(layered-review|code-review)\b",
+    r"verification[-\s]?gap\s+(review|layer)",
     r"produce\s+(a\s+|the\s+)?(findings\s+list|findings)",
     r"(run|conduct|perform|execute)\s+(a\s+|the\s+)?code\s+review",
     r"review\s+the\s+(branch\s+)?(diff|branch\s+code)",
@@ -71,7 +80,7 @@ NO_AUTO_APPLY = [
 DEFAULT_NON_REVIEW = ["story-spec", "story-impl", "story-finalize", "story-rebase",
                       "story-diagnose", "test-bat-runner",
                       "dev-preflight", "trace-port-traffic", "Explore", "Plan"]
-DEFAULT_REVIEW = ["blind-hunter", "edge-case-hunter", "acceptance-auditor",
+DEFAULT_REVIEW = ["blind-hunter", "edge-case-hunter", "verification-gap", "acceptance-auditor",
                   "findings-verifier", "findings-evaluator"]
 
 
@@ -83,14 +92,14 @@ def has_unnegated_match(text: str, pattern: str) -> bool:
     return False
 
 
-def evaluate(payload: dict) -> int:
+def violations_of(payload: dict) -> list[str]:
     if payload.get("tool_name") != "Agent":
-        return 0
+        return []
     ti = payload.get("tool_input") or {}
     prompt = ti.get("prompt", "")
     if not isinstance(prompt, str) or not prompt:
-        return 0
-    subagent_type = str(ti.get("subagent_type") or "").strip()
+        return []
+    subagent_type = base_role(str(ti.get("subagent_type") or "").strip()) or ""
 
     violations: list[str] = []
     neg_stripped = re.sub(
@@ -122,9 +131,26 @@ def evaluate(payload: dict) -> int:
                 "patches — the owner triages each finding." + hint
             )
 
-    if violations:
-        return g.block("Subagent dispatch prompt violates one or more discipline rules.",
-                       violations, HOOK, "Rewrite the prompt and try again.")
+    return violations
+
+
+HEADER = "Subagent dispatch prompt violates one or more discipline rules."
+FOOTER = "Rewrite the prompt and try again."
+
+
+def check(payload: dict) -> str | None:
+    """The block message for a violating dispatch, else None."""
+    found = violations_of(payload)
+    if not found:
+        return None
+    return (f"[workflow-hook] {HEADER}\n\nDetected violations:\n" + "".join(f"  - {v}\n" for v in found)
+            + f"\n{FOOTER}\n(Hook: .workflow/hooks/guards/{HOOK})\n")
+
+
+def evaluate(payload: dict) -> int:
+    found = violations_of(payload)
+    if found:
+        return g.block(HEADER, found, HOOK, FOOTER)
     return 0
 
 

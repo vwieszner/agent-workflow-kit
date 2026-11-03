@@ -72,12 +72,12 @@ class LedgerAndRecordTests(unittest.TestCase):
             "| Slot | Status | Story ID | Branch | Worktree | Since |\n"
             "|------|--------|----------|--------|----------|-------|\n"
             f"| 2 | in_use | 3-4 | story/3-4 | {wt} | 2026-01-01 |\n", encoding="utf-8")
-        self.assertEqual(self._run("append", "3-4", "checkpoint-1 spec approved")[0], 0)
+        self.assertEqual(self._run("append", "3-4", "phase-2 tests GREEN — pkg (1 tests)")[0], 0)
         self.assertTrue((wt / SPECS / "3-4-record.md").is_file(),
                         "record fell back to the main checkout while the worktree existed")
         self.assertFalse((self.root / SPECS / "3-4-record.md").exists())
         (wt / SPECS / "3-4-some-feature.md").write_text("# spec\n", encoding="utf-8")
-        self.assertEqual(self._run("check", "3-4", "checkpoint-1")[0], 0,
+        self.assertEqual(self._run("check", "3-4", "phase-2")[0], 0,
                          "the fact went missing once the worktree's specs dir existed")
 
     def test_negative_verdicts_match_whole_words_only(self):
