@@ -162,7 +162,7 @@ NOT_A_DENIAL = {"interrupted"}
 # ---------------------------------------------------------------- story ids
 
 def short_id(key: str) -> str | None:
-    """sprint-status key -> the id people type: 8-47-character-... -> 8-47, tq-21-gate-... -> tq-21."""
+    """sprint-status key -> the id people type: 1-2-login-form-... -> 1-2, ab-21-gate-... -> ab-21."""
     toks = key.lower().split("-")
     out = []
     for i, t in enumerate(toks):

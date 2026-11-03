@@ -85,7 +85,7 @@ def library_steps() -> list:
     return [
         {"type": "context-options", "origin": "library"},
         {"type": "before", "callId": "call@10", "startTime": 10.0, "class": "Frame", "method": "goto",
-         "params": {"url": "http://localhost:4173/campaigns/111/player-view"}},
+         "params": {"url": "http://localhost:4173/projects/111/dashboard"}},
         {"type": "after", "callId": "call@10", "endTime": 11.0},
         {"type": "before", "callId": "call@11", "startTime": 12.0, "class": "Frame", "method": "expect",
          "params": {"selector": "internal:testid=[data-testid=\"dnd5e-stat-card\"s]"}},
@@ -101,26 +101,26 @@ def failing_members() -> dict[str, list]:
             step("fixture@2", 'Fixture "page"', method="fixture", parent="hook@1"),
             step("pw:api@3", 'POST "/api/token/"', parent="hook@1"),
             done("pw:api@3"), done("fixture@2"), done("hook@1"),
-            step("pw:api@4", 'Navigate to "/campaigns/111/player-view"'), done("pw:api@4"),
+            step("pw:api@4", 'Navigate to "/projects/111/dashboard"'), done("pw:api@4"),
             step("expect@5", 'Expect "toBeVisible"', method="expect"),
             done("expect@5", error=ANSI_ERROR),
             {"type": "error", "message": ANSI_ERROR,
              "stack": [{"file": "/app/tests/pages/PlayerViewPage.js", "line": 43, "column": 38},
-                       {"file": "/app/tests/characters.spec.js", "line": 60, "column": 22}]},
+                       {"file": "/app/tests/items.spec.js", "line": 60, "column": 22}]},
             step("hook@6", "After Hooks", method="hook"), done("hook@6"),
         ],
         "0-trace.trace": library_steps() + [
-            console("error", "Failed to load resource: the server responded with a status of 500 → story",
-                    "http://localhost:4173/api/campaigns/111/story/"),
+            console("error", "Failed to load resource: the server responded with a status of 500 → tasks",
+                    "http://localhost:4173/api/projects/111/tasks/"),
             console("log", "routine log line", "http://localhost:4173/"),
             "{not json",
         ],
         "0-trace.network": [
             resource("GET", "http://localhost:4173/", 200),
-            resource("GET", "http://localhost:4173/api/campaigns/111/story/", 500),
-            resource("GET", "http://localhost:4173/api/campaigns/111/story/", 500),
-            resource("GET", "http://localhost:4173/api/characters/?page=1", -1, "net::ERR_ABORTED"),
-            resource("GET", "http://localhost:4173/api/campaign-players/active-players/", -1),
+            resource("GET", "http://localhost:4173/api/projects/111/tasks/", 500),
+            resource("GET", "http://localhost:4173/api/projects/111/tasks/", 500),
+            resource("GET", "http://localhost:4173/api/items/?page=1", -1, "net::ERR_ABORTED"),
+            resource("GET", "http://localhost:4173/api/active-members/", -1),
         ],
     }
 
@@ -134,24 +134,24 @@ class PwFailureSummaryTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_one_failing_test_is_summarised(self):
-        write_trace(self.root / "characters-Character-Stats-chromium", failing_members())
+        write_trace(self.root / "items-Item-Stats-chromium", failing_members())
         proc = run(str(self.root))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.splitlines(), [
-            "== characters-Character-Stats-chromium",
+            "== items-Item-Stats-chromium",
             "   !! 1 trace line(s) did not parse: this summary is incomplete",
             "   error: Error: expect(locator).toBeVisible() failed",
             "   error: Locator:  getByTestId('dnd5e-stat-card')",
             "   error: Expected: visible",
             "   at /app/tests/pages/PlayerViewPage.js:43",
             '   action: POST "/api/token/"',
-            '   action: Navigate to "/campaigns/111/player-view"',
+            '   action: Navigate to "/projects/111/dashboard"',
             '   FAILED action: Expect "toBeVisible"',
-            "   http 500 GET http://localhost:4173/api/campaigns/111/story/ x2",
-            "   failed GET http://localhost:4173/api/campaign-players/active-players/ — no response",
-            "   failed GET http://localhost:4173/api/characters/?page=1 — net::ERR_ABORTED",
-            "   console: Failed to load resource: the server responded with a status of 500 → story"
-            " @ http://localhost:4173/api/campaigns/111/story/",
+            "   http 500 GET http://localhost:4173/api/projects/111/tasks/ x2",
+            "   failed GET http://localhost:4173/api/active-members/ — no response",
+            "   failed GET http://localhost:4173/api/items/?page=1 — net::ERR_ABORTED",
+            "   console: Failed to load resource: the server responded with a status of 500 → tasks"
+            " @ http://localhost:4173/api/projects/111/tasks/",
         ])
 
     def test_action_titles_prefer_test_trace_and_fall_back_to_library_events(self):
@@ -163,7 +163,7 @@ class PwFailureSummaryTests(unittest.TestCase):
         first, second = lines.index("== a-with-test-trace"), lines.index("== b-library-only")
         self.assertIn('   FAILED action: Expect "toBeVisible"', lines[first:second])
         self.assertNotIn("Frame.goto", "\n".join(lines[first:second]))
-        self.assertIn("   action: Frame.goto http://localhost:4173/campaigns/111/player-view", lines[second:])
+        self.assertIn("   action: Frame.goto http://localhost:4173/projects/111/dashboard", lines[second:])
         self.assertIn('   FAILED action: Frame.expect internal:testid=[data-testid="dnd5e-stat-card"s]', lines[second:])
 
     def test_failed_step_is_the_leaf_not_its_enclosing_step(self):
@@ -184,12 +184,12 @@ class PwFailureSummaryTests(unittest.TestCase):
     def test_error_outside_a_step_lists_the_actions_before_teardown(self):
         members = {
             "test.trace": [
-                step("pw:api@1", 'Navigate to "/campaigns/21"'), done("pw:api@1"),
+                step("pw:api@1", 'Navigate to "/projects/21"'), done("pw:api@1"),
                 step("pw:api@2", 'POST "/api/game-sessions/21/roll/cast/"'), done("pw:api@2"),
                 {"type": "error", "message": "Error: Failed to cast a DM roll: 500 <!DOCTYPE html>",
                  "stack": [{"file": "/app/tests/helpers.js", "line": 660}]},
                 step("hook@3", "After Hooks", method="hook"),
-                step("pw:api@4", 'DELETE "/api/campaigns/21/"', parent="hook@3"), done("pw:api@4"),
+                step("pw:api@4", 'DELETE "/api/projects/21/"', parent="hook@3"), done("pw:api@4"),
                 done("hook@3"),
                 step("hook@5", "Worker Cleanup", method="hook"),
                 step("fixture@6", 'Fixture "browser"', method="fixture", parent="hook@5"),
@@ -205,7 +205,7 @@ class PwFailureSummaryTests(unittest.TestCase):
             "   error: Error: Failed to cast a DM roll: 500 <!DOCTYPE html>",
             "   at /app/tests/helpers.js:660",
             "   no failed step recorded: the error was thrown outside a Playwright action",
-            '   action: Navigate to "/campaigns/21"',
+            '   action: Navigate to "/projects/21"',
             '   action: POST "/api/game-sessions/21/roll/cast/"',
             "   http 500 POST http://backend:8001/api/game-sessions/21/roll/cast/",
         ])

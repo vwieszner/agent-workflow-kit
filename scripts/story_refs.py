@@ -89,8 +89,8 @@ def scopes_table() -> dict[str, tuple[str, str]]:
 
 SCOPES = scopes_table()
 NUMERIC_ID = re.compile(r"\d+(?:[.-]\d+)+[a-z]?", re.IGNORECASE)
-# A full key's leading id: an optional letter prefix (tq-, cr-) then the dashed numeric segments, each
-# with an optional letter suffix (8-34a-dm-seals-... -> 8-34a, tq-17-... -> tq-17).
+# A full key's leading id: an optional letter prefix (ab-, cr-) then the dashed numeric segments, each
+# with an optional letter suffix (1-4a-login-form-... -> 1-4a, ab-17-... -> ab-17).
 SHORT_RE = re.compile(r"^((?:[a-z]+\d*-)?\d+[a-z]?(?:-\d+[a-z]?)*)(?:-|$)")
 STORY_WORD = re.compile(r"(?:stor(?:y|ies)|deps?)\W{0,3}$", re.IGNORECASE)
 # Left edge of a match: not inside a longer token, a date, a version or a longer id (18-34a, 2026-10-10),

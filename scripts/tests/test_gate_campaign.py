@@ -70,8 +70,8 @@ class CampaignCase(unittest.TestCase):
         self.registry.parent.mkdir(parents=True)
         self.registry.write_text(
             HEADER
-            + f"| 1 | in_use | tq-37 | story/tq-37 | {self.worktree.as_posix()} | 2026-10-07 |\n"
-            + "| 2 | in_use | tq-9 | story/tq-9 | \u2014 | 2026-10-07 |\n"
+            + f"| 1 | in_use | ab-37 | story/ab-37 | {self.worktree.as_posix()} | 2026-10-07 |\n"
+            + "| 2 | in_use | ab-9 | story/ab-9 | \u2014 | 2026-10-07 |\n"
             + "| 3 | free | \u2014 | \u2014 | \u2014 | \u2014 |\n",
             encoding="utf-8")
         for patcher in (mock.patch.object(gate_campaign.tempfile, "gettempdir",
@@ -81,7 +81,7 @@ class CampaignCase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
 
     def args(self, runs=2, max_wall_s=0, forbid=(), extra=()):
-        return argparse.Namespace(story_id="tq-37", runs=runs, max_wall_s=max_wall_s,
+        return argparse.Namespace(story_id="ab-37", runs=runs, max_wall_s=max_wall_s,
                                   forbid=list(forbid), out=str(self.out), extra=list(extra))
 
     def run_campaign(self, fake: FakeRun, walls, **kw) -> tuple[int, str]:
@@ -102,16 +102,16 @@ class CampaignCase(unittest.TestCase):
 
 class RegistryTests(CampaignCase):
     def test_worktree_from_registry_row(self):
-        self.assertEqual(gate_campaign._worktree("tq-37"), self.worktree)
+        self.assertEqual(gate_campaign._worktree("ab-37"), self.worktree)
 
     def test_unknown_story_is_a_setup_error_not_a_red_gate(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
-            gate_campaign._worktree("tq-3")  # a prefix of tq-37 must not match its row
+            gate_campaign._worktree("ab-3")  # a prefix of ab-37 must not match its row
         self.assertEqual(cm.exception.code, gate_campaign.SETUP_ERROR)
 
     def test_em_dash_worktree_is_a_setup_error(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
-            gate_campaign._worktree("tq-9")
+            gate_campaign._worktree("ab-9")
         self.assertEqual(cm.exception.code, gate_campaign.SETUP_ERROR)
 
 
@@ -160,7 +160,7 @@ class StopRuleTests(CampaignCase):
         self.assertIn("forbidden log lines", out)
         self.assertEqual(len(fake.gate_calls), 1)
         argv = fake.logs_calls[0]
-        self.assertEqual(argv[argv.index("-p") + 1], "story-tq-37")
+        self.assertEqual(argv[argv.index("-p") + 1], "story-ab-37")
         self.assertEqual(argv[-2:], ["backend", "worker"])
 
     def test_log_fetch_timeout_counts_as_a_hit(self):
@@ -204,7 +204,7 @@ class ArtifactAndArgvTests(CampaignCase):
 
     def test_cli_passes_args_after_double_dash_to_the_worktree_runner(self):
         fake = FakeRun([0])
-        argv = ["run", "--story-id", "tq-37", "--runs", "1",
+        argv = ["run", "--story-id", "ab-37", "--runs", "1",
                 "--out", str(self.out), "--forbid", "A", "--", "--record"]
         stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")  # main() reconfigures stdout
         with mock.patch.object(gate_campaign.subprocess, "run", fake), \
@@ -214,12 +214,12 @@ class ArtifactAndArgvTests(CampaignCase):
             self.assertEqual(gate_campaign.main(argv), 0)
         self.assertEqual(fake.gate_calls[0], [
             sys.executable, str(gate_campaign.SCRIPTS_DIR / "run_full_suite.py"),
-            "--story-id", "tq-37", "--record"])
+            "--story-id", "ab-37", "--record"])
 
     def test_cli_usage_error_is_a_setup_error(self):
         with mock.patch.object(sys, "stdout", io.TextIOWrapper(io.BytesIO(), encoding="utf-8")), \
                 contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
-            gate_campaign.main(["run", "--story-id", "tq-37"])
+            gate_campaign.main(["run", "--story-id", "ab-37"])
         self.assertEqual(cm.exception.code, gate_campaign.SETUP_ERROR)
 
 

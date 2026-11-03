@@ -100,7 +100,7 @@ WORKFLOW_TOOLS = {"Workflow"}
 
 
 def review_workflow() -> str:
-    return str(wfconfig.get("review.workflow_name", "layered-review"))
+    return str(wfconfig.get("review.workflow_name", "review"))
 
 
 PHASE_LABEL = {
@@ -1336,7 +1336,7 @@ def build(story_id: str) -> str:
               else PHASE_LABEL.get(last_type, last_type))
         nxt = {
             "story-spec": "checkpoint-1 approval, then phase-2",
-            "story-impl": f"{wf_name} (round 1)",
+            "story-impl": "layered-review (round 1)",
             wf_name: "checkpoint-2 triage of the latest round",
             "findings-verifier": "checkpoint-2 triage",
             "story-finalize": "the review loop line (a close-out round due, the loop ended, or the next-round "
@@ -1359,10 +1359,10 @@ def build(story_id: str) -> str:
             rnd = workflow_round(last)
             if rnd is None:
                 at = f"review round {n_rounds} (round arg not in the journal; completion unverified)"
-                nxt_out = (f"next: confirm the record's `review round <n> recorded` line, else relaunch {wf_name}")
+                nxt_out = "next: confirm the record's `review round <n> recorded` line, else relaunch layered-review"
             elif int(rnd) not in recorded:
                 at = f"review round {rnd} in progress (launched, not recorded)"
-                nxt_out = f"next: relaunch {wf_name} round {rnd}"
+                nxt_out = f"next: relaunch layered-review round {rnd}"
         retry_note = f" | layer retries: {len(retries)}" if retries else ""
         L.append(f"**Position:** {at} | rounds observed: {n_rounds}{retry_note} | "
                  f"story-finalize runs: {len(finalizes)} | {nxt_out}")

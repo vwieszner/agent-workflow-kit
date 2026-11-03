@@ -53,7 +53,7 @@ RAW = "a command line does not identify a stack"
 HELPER = "uv run --no-project .workflow/scripts/kill_owned.py"
 SANCTIONED = "run directly as " + HELPER
 SCRIPT = ".workflow/scripts/kill_owned.py"
-WORKTREE = "D:/work/proj-worktrees/tq-59"
+WORKTREE = "D:/work/proj-worktrees/ab-59"
 STAMP = "2026-10-16T08:35:57.131Z"
 
 DENIED = [
@@ -130,7 +130,7 @@ BASH_ONLY_DENIED = [
 POWERSHELL_ONLY_DENIED = [
     "@'\nStop-Process -Id 1\n'@ | iex",
     "iex @'\nStop-Process -Id 1\n'@",
-    r'Get-ChildItem "D:\work\"; Stop-Process -Id 1',
+    r'Get-ChildItem "C:\src\"; Stop-Process -Id 1',
     r'echo "\$(kill 1)"',
 ]
 
@@ -173,10 +173,10 @@ ALLOWED = [
     "uv run --no-project -m unittest scripts.tests.test_kill_owned",
     "uv run --no-project -m scripts.tests.test_kill_owned",
     "uv run --no-project --with psutil --module http.server 8000",
-    'uv run --no-project scripts/story_record.py append tq-59 "note on kill_owned.py ordering"',
+    'uv run --no-project scripts/story_record.py append ab-59 "note on kill_owned.py ordering"',
     "cat scripts/kill_owned.py; echo done",
     "git log --oneline | grep kill_owned",
-    "cd D:/work/proj-worktrees/tq-59 && git diff -- scripts/kill_owned.py",
+    "cd D:/work/proj-worktrees/ab-59 && git diff -- scripts/kill_owned.py",
     "git diff -- scripts/kill_owned.py 2>&1",
     "git diff -- scripts/kill_owned.py | head",
     "git add scripts/kill_owned.py scripts/INDEX.md 2>&1",
@@ -194,7 +194,7 @@ ALLOWED = [
     'echo "$(cat scripts/kill_owned.py)" > scripts/k.py',
     "echo 'print(1)' | python -",
     "python - < scripts/probe.py",
-    'uv run --no-project scripts/story_record.py append tq-59 "$(cat note.txt)"',
+    'uv run --no-project scripts/story_record.py append ab-59 "$(cat note.txt)"',
     'python scripts/probe.py --out "$(pwd)"',
     'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Date"',
     "powershell -NoProfile -ex Bypass -c Get-Date",
@@ -626,7 +626,7 @@ class Transcripts(unittest.TestCase):
         path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
         return str(path)
 
-    def agent_transcript(self, prompt="story_id: tq-59\nworktree_path: " + WORKTREE + "\nspec_path: x", agent_id="a1"):
+    def agent_transcript(self, prompt="story_id: ab-59\nworktree_path: " + WORKTREE + "\nspec_path: x", agent_id="a1"):
         return self.write(f"agent-{agent_id}.jsonl", [
             {"type": "user", "timestamp": STAMP, "message": {"role": "user", "content": prompt}},
             {"type": "assistant", "timestamp": "2026-10-16T08:36:00.000Z",
@@ -669,7 +669,7 @@ class RewriteTests(Transcripts):
 
     def test_a_backslash_worktree_path_is_appended_with_forward_slashes(self):
         p = self.subagent(f"{HELPER} --pid 1", transcript=self.agent_transcript(
-            "worktree_path: D:\\work\\proj-worktrees\\tq-59"))
+            "worktree_path: D:\\work\\proj-worktrees\\ab-59"))
         command, record = self.split_token(pk.updated_input(p)["command"])
         self.assertTrue(command.endswith(f"--worktree {WORKTREE} --since {STAMP}"))
         self.assertEqual(record["worktree"], WORKTREE)
@@ -738,7 +738,7 @@ class RewriteTests(Transcripts):
                         "uv run --no-project scripts/proc_scan.py --match kill_owned.py",
                         "uv run ruff check scripts/kill_owned.py",
                         "python scripts/lint_on_commit.py scripts/kill_owned.py",
-                        'uv run --no-project scripts/story_record.py append tq-59 "note on kill_owned.py ordering"'):
+                        'uv run --no-project scripts/story_record.py append ab-59 "note on kill_owned.py ordering"'):
             with self.subTest(command=command):
                 p = self.subagent(command)
                 self.assertIsNone(pk.check(p))
@@ -752,7 +752,7 @@ class RewriteTests(Transcripts):
         self.assertEqual(record["worktree"], WORKTREE)
 
     def test_in_powershell_a_main_session_worktree_with_backslashes_is_rewritten_and_bound_as_typed(self):
-        path = r"D:\work\proj-worktrees\tq-59"
+        path = r"C:\src\proj-worktrees\ab-59"
         for named in (f"--worktree {path}", f'--worktree "{path}"', f"--worktree '{path}'"):
             with self.subTest(named=named):
                 p = self.session(f"{HELPER} {named} --pid 1", tool="PowerShell")
@@ -803,7 +803,7 @@ class TokenTests(Transcripts):
                 self.assertIn("already used", ko.token_problem(args))
 
     def test_the_helper_refuses_a_token_for_other_facts_than_the_call_carries(self):
-        for field, value in (("since", "2030-01-01T00:00:00Z"), ("worktree", "D:/work/proj-worktrees/tq-5")):
+        for field, value in (("since", "2030-01-01T00:00:00Z"), ("worktree", "D:/work/proj-worktrees/ab-5")):
             words = pk.updated_input(self.subagent(f"{HELPER} --pid 1"))["command"].split()
             args = ko.parse_args(words[words.index(SCRIPT) + 1:])
             setattr(args, field, value)
@@ -865,7 +865,7 @@ class DenyTests(Transcripts):
         self.assertEqual(self.token_files(), [])
 
     def test_in_bash_a_main_session_worktree_with_a_backslash_is_denied_quoted_or_not(self):
-        path = r"D:\work\proj-worktrees\tq-59"
+        path = r"C:\src\proj-worktrees\ab-59"
         for named in (f"--worktree {path}", f'--worktree "{path}"', f"--worktree '{path}'", f'--worktree="{path}"'):
             with self.subTest(named=named):
                 self.denied(self.session(f"{HELPER} {named} --pid 1"), "forward slashes")
@@ -1111,7 +1111,7 @@ class DenyTests(Transcripts):
         self.denied(self.session(f"python {SCRIPT} --worktree {WORKTREE} --pid 1"), SANCTIONED)
 
     def test_a_dispatch_without_a_worktree_path_is_denied(self):
-        self.denied(self.subagent(f"{HELPER} --pid 1", transcript=self.agent_transcript("story_id: tq-59\ngo")),
+        self.denied(self.subagent(f"{HELPER} --pid 1", transcript=self.agent_transcript("story_id: ab-59\ngo")),
                     "owns no worktree")
 
     def test_an_unreadable_transcript_is_denied(self):

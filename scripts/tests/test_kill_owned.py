@@ -65,7 +65,7 @@ class ContainmentTests(unittest.TestCase):
             self.assertTrue(ko.inside(WT.replace("/", "\\") + "\\src\\frontend", WT))
 
     def test_a_longer_sibling_name_is_not_inside(self):
-        self.assertFalse(ko.inside(f"{ROOT}/tq-59/src", f"{ROOT}/tq-5"))
+        self.assertFalse(ko.inside(f"{ROOT}/ab-59/src", f"{ROOT}/ab-5"))
         self.assertFalse(ko.inside(f"{ROOT}/8-34a", f"{ROOT}/8-34"))
 
     def test_the_worktree_root_is_not_inside_the_main_checkout(self):
@@ -83,8 +83,8 @@ class OwnershipRuleTests(unittest.TestCase):
         self.assertEqual(reasons(row(100, f"{WT}/src")), [])
 
     def test_another_worktree_is_refused_and_named(self):
-        text = "; ".join(reasons(row(100, f"{ROOT}/tq-59/src")))
-        self.assertIn("worktree `tq-59`", text)
+        text = "; ".join(reasons(row(100, f"{ROOT}/ab-59/src")))
+        self.assertIn("worktree `ab-59`", text)
 
     def test_the_main_checkout_is_refused_and_named(self):
         text = "; ".join(reasons(row(100, f"{MAIN}")))
@@ -158,12 +158,12 @@ class OwnershipRuleTests(unittest.TestCase):
         self.assertIn("own", "; ".join(reasons(row(7, WT), me=frozenset({7}))))
 
     def test_every_failing_rule_is_named_joined_by_semicolons(self):
-        found = reasons(row(100, f"{ROOT}/tq-59", created=T0 - 5, cmdline=WATCH_CMD, name="docker.exe"))
+        found = reasons(row(100, f"{ROOT}/ab-59", created=T0 - 5, cmdline=WATCH_CMD, name="docker.exe"))
         self.assertGreaterEqual(len(found), 3)
 
     def test_prefix_traps(self):
-        self.assertNotEqual(reasons(row(100, f"{ROOT}/tq-59/src"), owner(worktree=f"{ROOT}/tq-5")), [])
-        self.assertEqual(reasons(row(100, f"{ROOT}/tq-5/src"), owner(worktree=f"{ROOT}/tq-5")), [])
+        self.assertNotEqual(reasons(row(100, f"{ROOT}/ab-59/src"), owner(worktree=f"{ROOT}/ab-5")), [])
+        self.assertEqual(reasons(row(100, f"{ROOT}/ab-5/src"), owner(worktree=f"{ROOT}/ab-5")), [])
 
 
 class CrossStackReplayTests(unittest.TestCase):
@@ -398,15 +398,15 @@ class UnreadRouteTests(ArgumentCase):
 
 
 class CallerStackTests(unittest.TestCase):
-    ROWS = [(f"{ROOT}/tq-59", "tq-59"), (f"{ROOT}/tq-5", "tq-5")]
+    ROWS = [(f"{ROOT}/ab-59", "ab-59"), (f"{ROOT}/ab-5", "ab-5")]
 
     def test_the_stack_is_story_id_of_the_row_whose_worktree_is_the_callers(self):
-        self.assertEqual(ko.caller_stack(f"{ROOT}/tq-59", self.ROWS), "story-tq-59")
-        self.assertEqual(ko.caller_stack(f"{ROOT}/tq-5", self.ROWS), "story-tq-5")
+        self.assertEqual(ko.caller_stack(f"{ROOT}/ab-59", self.ROWS), "story-ab-59")
+        self.assertEqual(ko.caller_stack(f"{ROOT}/ab-5", self.ROWS), "story-ab-5")
 
     def test_no_matching_row_means_no_stack(self):
         self.assertIsNone(ko.caller_stack(f"{ROOT}/cr-7", self.ROWS))
-        self.assertIsNone(ko.caller_stack(f"{ROOT}/tq-59", []))
+        self.assertIsNone(ko.caller_stack(f"{ROOT}/ab-59", []))
 
 
 class OutputTests(unittest.TestCase):

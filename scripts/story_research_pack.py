@@ -169,7 +169,7 @@ def build(story_id: str, wt: Path) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
-    ap.add_argument("story_id", help="dashed story id, e.g. 16-11 or tq-40")
+    ap.add_argument("story_id", help="dashed story id, e.g. 1-2 or ab-40")
     ap.add_argument("--worktree", type=Path, required=True, help="the story's worktree (or checkout) root")
     ap.add_argument("--out", type=Path, default=None,
                     help="default: .workflow/state/story-setup/research-<story_id>.md")
