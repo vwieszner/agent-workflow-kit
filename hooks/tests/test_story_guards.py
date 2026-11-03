@@ -23,6 +23,23 @@ def transcript(path: Path, prompt: str, tool_uses: list[dict] | None = None) -> 
 
 
 class LandLeaseWaitTests(HookTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        import subprocess
+        g = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-C", str(self.root)]
+        subprocess.run([*g, "init", "-q", "-b", "development"], check=True)
+        subprocess.run([*g, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+        subprocess.run([*g, "branch", "story/7-2"], check=True)
+        subprocess.run([*g, "checkout", "-q", "story/7-2"], check=True)
+        subprocess.run([*g, "commit", "-q", "--allow-empty", "-m", "story"], check=True)
+        subprocess.run([*g, "checkout", "-q", "development"], check=True)
+        wt = self.root / "wt"
+        (wt / "docs" / "implementation-artifacts").mkdir(parents=True)
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs" / "slot-registry.md").write_text(
+            "| Slot | Status | Story ID | Branch | Worktree | Since |\n|---|---|---|---|---|---|\n"
+            f"| 1 | in_use | 7-2 | story/7-2 | {wt} | 2026-01-01 |\n", encoding="utf-8")
+
     def _lease(self, story: str) -> None:
         state = self.root / ".workflow" / "state"
         state.mkdir(parents=True, exist_ok=True)
