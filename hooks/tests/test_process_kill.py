@@ -53,7 +53,7 @@ RAW = "a command line does not identify a stack"
 HELPER = "uv run --no-project .workflow/scripts/kill_owned.py"
 SANCTIONED = "run directly as " + HELPER
 SCRIPT = ".workflow/scripts/kill_owned.py"
-WORKTREE = "D:/work/proj-worktrees/ab-59"
+WORKTREE = "C:/src/proj-worktrees/ab-59"
 STAMP = "2026-10-16T08:35:57.131Z"
 
 DENIED = [
@@ -113,7 +113,7 @@ DENIED = [
     'echo "$(kill 1234)"',
     'echo "$(echo "$(kill 1)")"',
     'Write-Output "$(Stop-Process -Id 1)"',
-    "pwsh -Command 'Get-ChildItem \"D:\\work\\\"; Stop-Process -Id 1'",
+    "pwsh -Command 'Get-ChildItem \"C:\\src\\\"; Stop-Process -Id 1'",
     "bash -c 'echo `kill 1`'",
 ]
 BASH_ONLY_DENIED = [
@@ -176,7 +176,7 @@ ALLOWED = [
     'uv run --no-project scripts/story_record.py append ab-59 "note on kill_owned.py ordering"',
     "cat scripts/kill_owned.py; echo done",
     "git log --oneline | grep kill_owned",
-    "cd D:/work/proj-worktrees/ab-59 && git diff -- scripts/kill_owned.py",
+    "cd C:/src/proj-worktrees/ab-59 && git diff -- scripts/kill_owned.py",
     "git diff -- scripts/kill_owned.py 2>&1",
     "git diff -- scripts/kill_owned.py | head",
     "git add scripts/kill_owned.py scripts/INDEX.md 2>&1",
@@ -225,7 +225,7 @@ POWERSHELL_ONLY_ALLOWED = [
 ]
 # What a launch the caller controls hands kill_owned.py: another story's worktree, a launch time of 1970, a pid.
 FORGED_ARGS = "--worktree D:/other --since 1970-01-01T00:00:00Z --pid 1"
-PRELUDE = "echo \"__file__ = 'D:/work/proj/scripts/kill_owned.py'\""
+PRELUDE = "echo \"__file__ = 'C:/src/proj/scripts/kill_owned.py'\""
 # Launch routes only a deliberate evader would use. The hook does not read them (it neither denies nor rewrites them);
 # each ends at kill_owned.py's main() with FORGED_ARGS and no hook token, which the helper refuses.
 UNREAD_ROUTES = [
@@ -271,7 +271,7 @@ BASH_ESCAPED = [
 CONTINUED = ["python `\n  scripts/kill_owned.py --pid 1"]
 UV_MODULE_RUNS = [
     "uv run --no-project -m kill_owned --worktree D:/other --since 1970-01-01T00:00:00Z --pid 1",
-    "uv run --no-project --with psutil --directory D:/work/proj/scripts -m kill_owned --pid 1",
+    "uv run --no-project --with psutil --directory C:/src/proj/scripts -m kill_owned --pid 1",
     "uv run --no-project --module kill_owned --pid 1",
     "uv run --no-project --module=kill_owned --pid 1",
     "uv run --no-project --with psutil -m scripts.kill_owned --pid 1",
@@ -290,8 +290,8 @@ PY_VALUE_OPTION_RUNS = [
     f"py -3 --check-hash-based-pycs always {SCRIPT} --pid 1",
     f"uv run --no-project python --check-hash-based-pycs always {SCRIPT} --pid 1",
     "uv run --no-project python --check-hash-based-pycs always -m kill_owned --pid 1",
-    f"D:/work/proj/.venv/Scripts/python.exe --check-hash-based-pycs always {SCRIPT} --pid 1",
-    "D:/work/proj/.venv/Scripts/python.exe --check-hash-based-pycs always -m kill_owned --pid 1",
+    f"C:/src/proj/.venv/Scripts/python.exe --check-hash-based-pycs always {SCRIPT} --pid 1",
+    "C:/src/proj/.venv/Scripts/python.exe --check-hash-based-pycs always -m kill_owned --pid 1",
 ]
 # Every spelling powershell.exe takes: a `-` or `/` lead, any case, any prefix of the name (`-ec` aliases the encoded
 # switch); a `--` lead and a glued `:value` are rejected by it.
@@ -442,12 +442,12 @@ class CorpusTests(unittest.TestCase):
 
     def test_a_nested_shell_is_scanned_with_the_nested_shells_quoting(self):
         for outer, command, verb in (
-            ("Bash", "pwsh -Command 'Get-ChildItem \"D:\\work\\\"; Stop-Process -Id 1'", "Stop-Process"),
+            ("Bash", "pwsh -Command 'Get-ChildItem \"C:\\src\\\"; Stop-Process -Id 1'", "Stop-Process"),
             ("PowerShell", "bash -c 'echo `kill 1`'", "kill"),
         ):
             with self.subTest(outer=outer):
                 self.assertEqual(pk._raw_kill(command, outer), verb)
-        self.assertIsNone(pk._raw_kill('Get-ChildItem "D:\\work\\"; Stop-Process -Id 1', "Bash"))
+        self.assertIsNone(pk._raw_kill('Get-ChildItem "C:\\src\\"; Stop-Process -Id 1', "Bash"))
         self.assertIsNone(pk._raw_kill("echo `kill 1`", "PowerShell"))
 
     def test_every_spelling_powershell_takes_for_its_command_parameter_is_scanned(self):
@@ -669,7 +669,7 @@ class RewriteTests(Transcripts):
 
     def test_a_backslash_worktree_path_is_appended_with_forward_slashes(self):
         p = self.subagent(f"{HELPER} --pid 1", transcript=self.agent_transcript(
-            "worktree_path: D:\\work\\proj-worktrees\\ab-59"))
+            "worktree_path: C:\\src\\proj-worktrees\\ab-59"))
         command, record = self.split_token(pk.updated_input(p)["command"])
         self.assertTrue(command.endswith(f"--worktree {WORKTREE} --since {STAMP}"))
         self.assertEqual(record["worktree"], WORKTREE)
@@ -803,7 +803,7 @@ class TokenTests(Transcripts):
                 self.assertIn("already used", ko.token_problem(args))
 
     def test_the_helper_refuses_a_token_for_other_facts_than_the_call_carries(self):
-        for field, value in (("since", "2030-01-01T00:00:00Z"), ("worktree", "D:/work/proj-worktrees/ab-5")):
+        for field, value in (("since", "2030-01-01T00:00:00Z"), ("worktree", "C:/src/proj-worktrees/ab-5")):
             words = pk.updated_input(self.subagent(f"{HELPER} --pid 1"))["command"].split()
             args = ko.parse_args(words[words.index(SCRIPT) + 1:])
             setattr(args, field, value)
@@ -873,7 +873,7 @@ class DenyTests(Transcripts):
 
     def test_a_shell_command_naming_the_token_directory_is_denied_in_both_shells(self):
         for command in (
-            "cp note.json D:/work/proj/.story-setup/kill-tokens/" + "0" * 32 + ".json",
+            "cp note.json C:/src/proj/.story-setup/kill-tokens/" + "0" * 32 + ".json",
             "echo '{}' > .story-setup/kill-tokens/a.json",
             "ls .story-setup/KILL-TOKENS",
             "python -c \"open('.story-setup/kill-tokens/a.json', 'w')\"",
@@ -934,7 +934,7 @@ class DenyTests(Transcripts):
         self.denied(p, "own command")
 
     def test_a_kill_owned_call_not_launched_by_uv_is_denied_naming_the_sanctioned_form(self):
-        for call in (f"D:/work/proj/.venv/Scripts/python.exe {SCRIPT} --pid 1",
+        for call in (f"C:/src/proj/.venv/Scripts/python.exe {SCRIPT} --pid 1",
                      f"python {SCRIPT} --pid 1", f"python3 -u {SCRIPT} --pid 1", f"py -3 {SCRIPT} --pid 1",
                      f"{SCRIPT} --pid 1", f"cd D:/x && python {SCRIPT} --pid 1"):
             with self.subTest(call=call):
@@ -1025,7 +1025,7 @@ class DenyTests(Transcripts):
             f'iex "{HELPER} --pid 1"',
             f"Start-Process uv -ArgumentList run,--no-project,{SCRIPT},--pid,1",
             "uv run --no-project python -m kill_owned --pid 1",
-            "PYTHONPATH=D:/work/proj/scripts uv run --no-project --with psutil "
+            "PYTHONPATH=C:/src/proj/scripts uv run --no-project --with psutil "
             "python -m kill_owned --pid 1",
             f'uv run --no-project bash -c "python {SCRIPT} --pid 1"',
             "uv run --no-project python -c \"import runpy,sys; sys.argv=['k','--worktree','D:/other',"
@@ -1033,7 +1033,7 @@ class DenyTests(Transcripts):
             f"uv run --no-project $SHELL -c 'x' {SCRIPT}",
             f"uv run --no-project python {SCRIPT} --pid 1",
             f"K={SCRIPT}; python $K --pid 1",
-            "python D:/work/proj/scripts/kill_own*.py --pid 1",
+            "python C:/src/proj/scripts/kill_own*.py --pid 1",
             f"uv run --no-project powershell -NoProfile {SCRIPT} --pid 1",
             f"uv run --no-project powershell -File {SCRIPT} --pid 1",
         ):
@@ -1100,7 +1100,7 @@ class DenyTests(Transcripts):
                 self.denied(p, SANCTIONED)
 
     def test_a_call_that_supplies_facts_and_is_not_launched_by_uv_is_denied_for_both_reasons(self):
-        call = (f"D:/work/proj/.venv/Scripts/python.exe {SCRIPT} --worktree D:/other "
+        call = (f"C:/src/proj/.venv/Scripts/python.exe {SCRIPT} --worktree D:/other "
                 "--since 1970-01-01T00:00:00Z --pid 1")
         message = pk.check(self.subagent(call))
         self.assertIn("the hook supplies --worktree and --since", message)

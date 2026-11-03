@@ -43,7 +43,7 @@ class Base(unittest.TestCase):
 
 class HelperTests(unittest.TestCase):
     def test_slug(self):
-        self.assertEqual("D--work-repo", _transcripts.slug("D:\\work\\repo"))
+        self.assertEqual("C--src-repo", _transcripts.slug("C:\\src\\repo"))
         self.assertEqual("-home-u-repo", _transcripts.slug("/home/u/repo"))
 
     def test_base_role_default(self):

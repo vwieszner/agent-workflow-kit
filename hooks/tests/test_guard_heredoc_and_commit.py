@@ -39,7 +39,7 @@ class HeredocTests(HookTestCase):
 
     def test_substitution_inside_double_quotes_is_its_own_context(self):
         self.assertEqual(ALLOW, self.exit_code(BASH, bash('echo "$(grep -E "\\bx\\b" f)"')))
-        self.assertEqual(DENY, self.exit_code(BASH, bash('echo "$(ls D:\\work\\x)"')))
+        self.assertEqual(DENY, self.exit_code(BASH, bash('echo "$(ls C:\\src\\x)"')))
 
     def test_residue_keeps_length(self):
         for text in ('a "$(b "c" d)" e', "x 'y' \"z\"", 'echo "$((1+2))"'):

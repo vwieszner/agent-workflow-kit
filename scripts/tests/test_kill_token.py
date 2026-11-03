@@ -27,7 +27,7 @@ import kill_token  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _state_testenv as te  # noqa: E402
 
-WORKTREE = "D:/work/proj-worktrees/ab-59"
+WORKTREE = "C:/src/proj-worktrees/ab-59"
 SINCE = "2026-10-16T08:35:57.131Z"
 T0 = 1_760_600_000.0
 EXPIRED = "the hook token has expired"
@@ -125,7 +125,7 @@ class RedeemTests(TokenCase):
         self.assertEqual(self.redeem(expired, now=edge + 0.001), UNKNOWN)
 
     def test_facts_other_than_the_issued_ones_refuse_and_burn_the_token(self):
-        for label, worktree, since in (("worktree", "D:/work/proj-worktrees/ab-5", SINCE),
+        for label, worktree, since in (("worktree", "C:/src/proj-worktrees/ab-5", SINCE),
                                        ("since", WORKTREE, "2026-10-16T08:35:58.000Z"),
                                        ("no since", WORKTREE, None),
                                        ("no worktree", None, SINCE)):
@@ -144,8 +144,8 @@ class RedeemTests(TokenCase):
 
     @unittest.skipUnless(os.name == "nt", "case-insensitive, backslash-separated paths are Windows-only")
     def test_the_worktree_is_compared_as_a_windows_path(self):
-        nonce = self.issue(worktree="D:/work/Proj-Worktrees/ab-59/")
-        self.assertIsNone(self.redeem(nonce, worktree="d:\\work\\proj-worktrees\\ab-59"))
+        nonce = self.issue(worktree="C:/src/Proj-Worktrees/ab-59/")
+        self.assertIsNone(self.redeem(nonce, worktree="C:\\src\\proj-worktrees\\ab-59"))
 
     def test_a_missing_or_malformed_nonce_is_refused_and_names_no_path_outside_the_directory(self):
         decoy = self.tmp / "decoy.json"
