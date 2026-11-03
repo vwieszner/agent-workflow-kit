@@ -13,7 +13,7 @@ section:
   * design-question tracker lines (`config: paths.design_questions`, optional) naming the story or a ticket
     (`config: paths.design_ticket_regex`) its epic block or tracker rows name;
   * deferred-work entries naming the story.
-A story is named by its dashed id (`16-11`, also as the prefix of its key) or, for a numbered story, its dotted
+A story is named by its dashed id (`16-911`, also as the prefix of its key) or, for a numbered story, its dotted
 id (`16.11`). Each section is capped; a capped section ends with the count of lines left out and the Grep that
 lists them.
 

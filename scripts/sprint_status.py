@@ -121,7 +121,7 @@ def _find_row(lines: list[str], key: str):
 
 
 def _lookup_key(lines: list[str], key: str) -> tuple[str | None, str]:
-    """(full key, "") for an exact key or a unique prefix (e.g. '21-15'); (None, reason) otherwise."""
+    """(full key, "") for an exact key or a unique prefix (e.g. '21-915'); (None, reason) otherwise."""
     exact, _ = _find_row(lines, key)
     if exact is not None:
         return key, ""
@@ -138,7 +138,7 @@ def _lookup_key(lines: list[str], key: str) -> tuple[str | None, str]:
 
 
 def _resolve_key(lines: list[str], key: str) -> str:
-    """Allow a unique prefix (e.g. '21-15') to stand in for the full story key."""
+    """Allow a unique prefix (e.g. '21-915') to stand in for the full story key."""
     full, reason = _lookup_key(lines, key)
     if full is None:
         _die(reason)

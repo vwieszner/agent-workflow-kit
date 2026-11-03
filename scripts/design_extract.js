@@ -6,10 +6,10 @@
 // Used when the REST API quota is exhausted (see .workflow/scripts/design_library.py). Paste this whole
 // file as the `code` of a `use_figma` call, followed by ONE main line:
 //
-//   return await sizeNodes(["93:67", "50:45"]);                 // chars per node, to plan chunks
-//   return await dumpNodes("ds-b1", ["93:67"], 0);              // part 0 of a compact node dump
-//   return await frameMap("ws-p1", ["10:290", "668:3199"], 0);  // part 0 of instance -> master maps
-//   return await fingerprints("fp-ds", { dsPages: ["2:2"], styles: true }, 0);  // content hashes
+//   return await sizeNodes(["21:43", "65:87"]);                 // chars per node, to plan chunks
+//   return await dumpNodes("ds-b1", ["21:43"], 0);              // part 0 of a compact node dump
+//   return await frameMap("ws-p1", ["12:34", "56:78"], 0);  // part 0 of instance -> master maps
+//   return await fingerprints("fp-ds", { dsPages: ["7:7"], styles: true }, 0);  // content hashes
 //
 // A refresh starts with one `fingerprints` call per file and re-extracts only what changed:
 // `design_library.py --plan` prints the exact calls (fingerprints first, then the changed nodes).
@@ -178,7 +178,7 @@ async function ser(n, depth, shallow, noKids) {
 }
 
 // Today's screen values: non-instance nodes in full, instances as master references plus their overrides.
-// return await shallowFrames("wsv-<n>", ["10:290"], 0);   sizes first: return await sizeShallow([...ids]);
+// return await shallowFrames("wsv-<n>", ["12:34"], 0);   sizes first: return await sizeShallow([...ids]);
 async function shallowFrames(tag, ids, part) {
   const nodes = {};
   for (const id of ids) {
@@ -198,7 +198,7 @@ async function sizeShallow(ids) {
 }
 
 // Top-level nodes of each page plus the page's prototype flow starting points.
-// return await topLevel("wst", ["0:1", "2:2"], 0);
+// return await topLevel("wst", ["0:1", "7:7"], 0);
 async function topEntry(p) {
   await p.loadAsync();
   return {
@@ -328,7 +328,7 @@ function chunk(kind, tag, text, part) {
 }
 
 // The union of each page's top-level bounds (layout and render), so a page-level get_screenshot can be
-// cropped per component or frame using their absolute boxes: return await pageBounds(["2:3"]);
+// cropped per component or frame using their absolute boxes: return await pageBounds(["7:8"]);
 async function pageBounds(pageIds) {
   const out = {};
   for (const pid of pageIds) {

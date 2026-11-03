@@ -18,8 +18,8 @@ description: MANDATORY. Read past tool calls and journal commands, and locate pr
 - `transcript_calls.py` reads Claude Code transcripts. Under OpenCode only the journal readers apply.
 
 ## Examples
-- ❌ `grep -oh 'run_scoped_tests\.py.\{0,400\}--record 7-2' ~/.claude/projects/<dir>/<session>/subagents/*.jsonl`
-- ✅ `uv run --no-project .workflow/scripts/transcript_calls.py grep --input "record 7-2" --since 2026-10-15 --agent-type story-impl`
+- ❌ `grep -oh 'run_scoped_tests\.py.\{0,400\}--record 7-92' ~/.claude/projects/<dir>/<session>/subagents/*.jsonl`
+- ✅ `uv run --no-project .workflow/scripts/transcript_calls.py grep --input "record 7-92" --since 2026-10-15 --agent-type story-impl`
 - ❌ Reading `.workflow/state/journal/<session>.jsonl` to find a command
 - ✅ `uv run --no-project .workflow/scripts/journal_grep.py command 'pytest .* -k slow' --since 2026-10-11`
 

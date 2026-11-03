@@ -207,7 +207,7 @@ class GateEndToEndTests(unittest.TestCase):
 
     def test_unknown_story_id_is_a_registry_error(self):
         self._setup(full="green")
-        code, out = self._main("--story-id", "9-99")
+        code, out = self._main("--story-id", "9-999")
         self.assertEqual(code, 2, out)
 
 

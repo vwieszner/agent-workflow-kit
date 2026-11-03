@@ -30,7 +30,7 @@ and the later steps still run:
              (`_bookkeeping.commit_own`), committed only when nothing else was staged.
 
 Usage:
-  uv run --no-project .workflow/scripts/halt_release.py --story-id 16-18 --failure-step spec-open-questions \
+  uv run --no-project .workflow/scripts/halt_release.py --story-id 16-918 --failure-step spec-open-questions \
       --failure-summary "story-spec returned 6 open questions: ..." --asked-of owner|external|both \
       [--last-test-output "<tail 30>"] [--external-ticket KEY --external-item "<the tracker row's Item cell>"]
 

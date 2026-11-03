@@ -199,7 +199,7 @@ class RecordTests(unittest.TestCase):
         reg.parent.mkdir(parents=True)
         reg.write_text("| Slot | Status | Story ID | Branch | Worktree | Since |\n"
                        "|------|--------|----------|--------|----------|-------|\n"
-                       f"| 1 | in_use | 7-2 | main | {root} | 2026-01-01 |\n", encoding="utf-8")
+                       f"| 1 | in_use | 7-92 | main | {root} | 2026-01-01 |\n", encoding="utf-8")
         (root / ".workflow" / "config.toml").write_text(
             f'[stack]\nruntime = "none"\n[tests]\ncode_root = "src"\n'
             f'scoped_cmd = {te.toml_str(run + " ut-ok {labels}")}\nscoped_parser = "unittest"\n'
@@ -222,24 +222,24 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(_git(self.root, "status", "--porcelain", "--", "src"), "?? src/new.py")
 
     def test_green_record_appends_the_line_and_saves_the_command(self):
-        code, out = self._main("--record", "7-2", "phase-2", "pkg.tests")
+        code, out = self._main("--record", "7-92", "phase-2", "pkg.tests")
         self.assertEqual(code, 0, out)
         self.assertIn("[SCOPED] lint PASS", out)
-        records = list(self.root.rglob("7-2-record.md"))
+        records = list(self.root.rglob("7-92-record.md"))
         self.assertEqual(len(records), 1, out)
         text = records[0].read_text(encoding="utf-8")
         self.assertRegex(text, r"phase-2 tests GREEN -- run_scoped_tests tests 2 tests, lint \(exit 0\) "
                                r"HEAD [0-9a-f]{12} code-tree [0-9a-f]{12}")
-        cmd = self.root / ".workflow" / "state" / "story-setup" / "7-2-phase-2.command"
-        self.assertIn("--record 7-2 phase-2", cmd.read_text(encoding="utf-8"))
+        cmd = self.root / ".workflow" / "state" / "story-setup" / "7-92-phase-2.command"
+        self.assertIn("--record 7-92 phase-2", cmd.read_text(encoding="utf-8"))
 
     def test_record_for_a_story_without_a_slot_is_refused(self):
-        code, out = self._main("--record", "9-9", "phase-2", "pkg.tests")
+        code, out = self._main("--record", "9-99", "phase-2", "pkg.tests")
         self.assertEqual(code, 2, out)
-        self.assertEqual(list(self.root.rglob("9-9-record.md")), [])
+        self.assertEqual(list(self.root.rglob("9-99-record.md")), [])
 
     def test_bad_phase_is_a_usage_error(self):
-        self.assertEqual(self._main("--record", "7-2", "phase-9", "pkg")[0], 2)
+        self.assertEqual(self._main("--record", "7-92", "phase-9", "pkg")[0], 2)
 
     def test_full_gate_record_appends_the_pre_merge_line(self):
         import run_full_suite
@@ -252,9 +252,9 @@ class RecordTests(unittest.TestCase):
         self.addCleanup(setattr, run_full_suite, "LOCK_DIR", real)
         out = io.StringIO()
         with redirect_stdout(out):
-            code = run_full_suite.main(["--story-id", "7-2", "--record"])
+            code = run_full_suite.main(["--story-id", "7-92", "--record"])
         self.assertEqual(code, 0, out.getvalue())
-        text = next(self.root.rglob("7-2-record.md")).read_text(encoding="utf-8")
+        text = next(self.root.rglob("7-92-record.md")).read_text(encoding="utf-8")
         self.assertRegex(text, r"pre-merge gate GREEN -- run_full_suite all legs \(exit 0\) HEAD [0-9a-f]{12} "
                                r"code-tree [0-9a-f]{12} base [0-9a-f]{12}")
 

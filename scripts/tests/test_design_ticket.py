@@ -37,14 +37,14 @@ TRACKER_HEAD = (
     "> More text.\n"
 )
 SPEC = {
-    "story_id": "8-36a", "topic": "Generating Chronicle overlay",
+    "story_id": "8-936a", "topic": "Generating Chronicle overlay",
     "builds": "the Chronicle generation progress overlay", "phase": None,
-    "what_this_is": "The overlay, from `479:1316`.",
+    "what_this_is": "The overlay, from `401:1001`.",
     "questions": [
         {"title": "Stalled generation", "body": "The overlay cannot be dismissed.",
-         "nodes": ["479:1316"], "options": ["(a) stay", "(b) close"], "ask": "Which?",
+         "nodes": ["401:1001"], "options": ["(a) stay", "(b) close"], "ask": "Which?",
          "interim": "(a), it stays until a page reload."},
-        {"title": "Glow", "body": "No variable carries it.", "sources": [{"source": "master", "value": "#FF8C00@50%"}],
+        {"title": "Glow", "body": "No variable carries it.", "sources": [{"source": "master", "value": "#3366CC@50%"}],
          "interim": "the drawn value."},
     ],
 }
@@ -58,8 +58,8 @@ def git(repo, *args):
 class LabelTests(unittest.TestCase):
     def test_dots_become_dashes(self):
         te.enter(self, CONFIG)
-        self.assertEqual(nt.story_label("8.36a"), "story-8-36a")
-        self.assertEqual(nt.query("8-36a"), 'project = UX AND labels = "story-8-36a"')
+        self.assertEqual(nt.story_label("8.936a"), "story-8-936a")
+        self.assertEqual(nt.query("8-936a"), 'project = UX AND labels = "story-8-936a"')
 
 
 class RenderTests(unittest.TestCase):
@@ -69,17 +69,17 @@ class RenderTests(unittest.TestCase):
     def test_new_ticket_has_the_required_sections_in_order(self):
         out = nt.render_ticket(SPEC)
         self.assertEqual(out["summary"], "[UX] Generating Chronicle overlay — 2 questions from the Chronicle "
-                                         "generation progress overlay (Story 8-36a)")
-        self.assertEqual(out["labels"], ["design-needed", "ux-design", "story-8-36a"])
+                                         "generation progress overlay (Story 8-936a)")
+        self.assertEqual(out["labels"], ["design-needed", "ux-design", "story-8-936a"])
         desc = out["description"]
-        self.assertTrue(desc.startswith("Story: 8-36a\n\n## What this is"))
+        self.assertTrue(desc.startswith("Story: 8-936a\n\n## What this is"))
         order = [desc.index(h) for h in ("## What this is", "## Questions", "## Done when")]
         self.assertEqual(order, sorted(order))
         self.assertNotIn("## Notes", desc)
         self.assertIn("1. **Stalled generation.** The overlay cannot be dismissed.", desc)
         self.assertIn("   - Options: (a) stay; (b) close", desc)
         self.assertIn("2. **Glow.**", desc)
-        self.assertIn("   - Sources: master: #FF8C00@50%", desc)
+        self.assertIn("   - Sources: master: #3366CC@50%", desc)
         self.assertIn("   - Interim ⚠️: the drawn value.", desc)
 
     def test_phase_label_and_notes(self):
@@ -104,8 +104,8 @@ class TrackerTests(unittest.TestCase):
         (self.repo / TRACKER).write_text(TRACKER_HEAD, encoding="utf-8")
 
     def add(self, ticket="UX-148"):
-        return nt.insert_tracker_row(self.repo, ticket, "Overlay: Q1 stall", "8-36a ships the interims, ⚠️",
-                                     "the owner, 8-36a Checkpoint 2", "2026-10-11")
+        return nt.insert_tracker_row(self.repo, ticket, "Overlay: Q1 stall", "8-936a ships the interims, ⚠️",
+                                     "the owner, 8-936a Checkpoint 2", "2026-10-11")
 
     def test_the_row_closes_the_ticket_table(self):
         self.assertTrue(self.add())
@@ -113,8 +113,8 @@ class TrackerTests(unittest.TestCase):
         row = lines.index(next(ln for ln in lines if "[UX-148]" in ln))
         self.assertEqual(lines[row + 1], ">")
         self.assertEqual(lines[row], "> | [UX-148](https://example.atlassian.net/browse/UX-148) | Overlay: Q1 stall | "
-                                     "Medium | 8-36a ships the interims, ⚠️ | ⏳ To Do — filed 2026-10-11 "
-                                     "(the owner, 8-36a Checkpoint 2) |")
+                                     "Medium | 8-936a ships the interims, ⚠️ | ⏳ To Do — filed 2026-10-11 "
+                                     "(the owner, 8-936a Checkpoint 2) |")
 
     def test_an_existing_key_adds_nothing(self):
         self.assertFalse(self.add("UX-140"))
@@ -143,7 +143,7 @@ class CommitTrackerTests(unittest.TestCase):
         git(repo, "commit", "-q", "-m", "base")
         (repo / TRACKER).write_text(TRACKER_HEAD.replace("> More text.", "> More text, edited elsewhere."),
                                        encoding="utf-8")
-        nt.insert_tracker_row(repo, "UX-148", "Q1", "8-36a ships the interims, ⚠️", "x", "2026-10-11")
+        nt.insert_tracker_row(repo, "UX-148", "Q1", "8-936a ships the interims, ⚠️", "x", "2026-10-11")
 
     def test_only_the_tickets_row_is_committed(self):
         self.assertTrue(nt.commit_tracker(self.repo, "UX-148", "docs: UX-148"))

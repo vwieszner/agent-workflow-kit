@@ -33,8 +33,8 @@ import design_instances as fi  # noqa: E402
 INDEX = """\
 | Component | Node | Page | Variants | Variant list | Value sheet |
 |---|---|---|---|---|---|
-| Button - Primary | `3:5` | Core | 2 | `3:6` State=Default<br>`3:10` State=Hover | [sets/button-primary.md](sets/button-primary.md) |
-| Left sidebar | `400:1` | Arch | 1 | `400:2` Screen=DM | [sets/left-sidebar.md](sets/left-sidebar.md) |
+| Button - Primary | `3:5` | Core | 2 | `3:6` State=Default<br>`3:14` State=Hover | [sets/button-primary.md](sets/button-primary.md) |
+| Left sidebar | `400:1` | Arch | 1 | `400:2` Screen=Admin | [sets/left-sidebar.md](sets/left-sidebar.md) |
 """
 
 BUTTON_SHEET = """\
@@ -42,49 +42,49 @@ BUTTON_SHEET = """\
 
 ### `3:6` State=Default
 
-- `3:6` component **State=Default** — 118×44; fill #FF8C00; radius 8
+- `3:6` component **State=Default** — 118×44; fill #3366CC; radius 8
   - `3:7` text **Button** — Inter 700 14/16
 
-### `3:10` State=Hover
+### `3:14` State=Hover
 
-- `3:10` component **State=Hover** — 118×44; fill #FFA73B; radius 8
-  - `3:11` text **Button** — Inter 700 14/16
+- `3:14` component **State=Hover** — 118×44; fill #5588EE; radius 8
+  - `3:15` text **Button** — Inter 700 14/16
 """
 
 SIDEBAR_SHEET = """\
 # Left sidebar
 
-- `400:2` component **Screen=DM** — 300×900
-  - `445:536` instance **Button - Primary** — 223×44; fill #FF8C00; radius 8
-    - `I445:536;3:7` text **Button** — Inter 700 18/16; "Cast Roll"
-  - `445:600` frame **Other** — 10×10
+- `400:2` component **Screen=Admin** — 300×900
+  - `245:136` instance **Button - Primary** — 223×44; fill #3366CC; radius 8
+    - `I245:136;3:7` text **Button** — Inter 700 18/16; "Submit order"
+  - `245:200` frame **Other** — 10×10
 """
 
 FRAME_MAP = """\
-# Frame map — mechanics
+# Frame map — checkout
 
 | Master component | Instances | Where (first 6) | Fields the instances override |
 |---|---|---|---|
-| **Button - Primary** → `State=Default` `3:6` | 3 | `I668:3208;445:536` in Left sidebar > Footer; `701:10` in Row 2 | — |
-| LOCAL `State=Default` (set `Button - Primary`) — component `816:1348` | 1 | `815:4284` in Main > Container | cornerRadius, effects |
-| **Left sidebar** → `Screen=DM` `400:2` | 1 | `668:3208` in Mechanics | — |
+| **Button - Primary** → `State=Default` `3:6` | 3 | `I268:1208;245:136` in Left sidebar > Footer; `301:10` in Row 2 | — |
+| LOCAL `State=Default` (set `Button - Primary`) — component `316:1348` | 1 | `315:1284` in Main > Container | cornerRadius, effects |
+| **Left sidebar** → `Screen=Admin` `400:2` | 1 | `268:1208` in Checkout | — |
 """
 
 FRAME_DUMP = """\
-# mechanics
+# checkout
 
-- `668:1` frame **Mechanics** — 1280×1024
-  - `701:10` instance **Button - Primary** — 164×44; fill #FF8C00; radius 8
-    - override `I701:10;3:7` text **Button** — "Send to Story"
-  - `815:4284` instance **Button - Primary** — 177×44; fill #FF8C00; radius 8
+- `268:1` frame **Checkout** — 1280×1024
+  - `301:10` instance **Button - Primary** — 164×44; fill #3366CC; radius 8
+    - override `I301:10;3:7` text **Button** — "Save draft"
+  - `315:1284` instance **Button - Primary** — 177×44; fill #3366CC; radius 8
   - `900:1` frame **Next** — 1×1
 """
 
 CODEGEN = """\
-<div data-node-id="668:1">
-<button className="rounded-[8px]" data-node-id="I668:3208;445:536" data-name="Button - Primary">
-<p className="text-[18px]" data-node-id="I668:3208;445:536;3:7">Cast Roll</p>
-<button className="rounded-[4px]" data-node-id="815:4284" data-name="Button - Primary">
+<div data-node-id="268:1">
+<button className="rounded-[8px]" data-node-id="I268:1208;245:136" data-name="Button - Primary">
+<p className="text-[18px]" data-node-id="I268:1208;245:136;3:7">Submit order</p>
+<button className="rounded-[4px]" data-node-id="315:1284" data-name="Button - Primary">
 """
 
 
@@ -95,12 +95,12 @@ def build(root: Path, codegen: bool = True) -> Path:
     (ml / "INDEX.md").write_text(INDEX, encoding="utf-8")
     (ml / "sets" / "button-primary.md").write_text(BUTTON_SHEET, encoding="utf-8")
     (ml / "sets" / "left-sidebar.md").write_text(SIDEBAR_SHEET, encoding="utf-8")
-    (ml / "frame-map" / "mechanics.md").write_text(FRAME_MAP, encoding="utf-8")
+    (ml / "frame-map" / "checkout.md").write_text(FRAME_MAP, encoding="utf-8")
     (ml / "frame-map" / "other.md").write_text(FRAME_MAP, encoding="utf-8")
-    (ml / "frames" / "mechanics.md").write_text(FRAME_DUMP, encoding="utf-8")
+    (ml / "frames" / "checkout.md").write_text(FRAME_DUMP, encoding="utf-8")
     if codegen:
         (root / "design" / "design-context").mkdir(parents=True)
-        (root / "design" / "design-context" / "mechanics.md").write_text(CODEGEN, encoding="utf-8")
+        (root / "design" / "design-context" / "checkout.md").write_text(CODEGEN, encoding="utf-8")
     return root
 
 
@@ -111,33 +111,33 @@ class DesignInstances(unittest.TestCase):
         te.enter(self, '[design]\nlibrary_dir = "design/library"\nintake_dir = "design"\n')
         self.root = build(Path(self.tmp.name))
 
-    def text(self, query: str, frames=("mechanics",)) -> str:
+    def text(self, query: str, frames=("checkout",)) -> str:
         return "\n".join(fi.report(query, self.root, set(frames)))
 
     def test_a_set_id_or_name_covers_the_variants_and_local_copies(self):
         for query in ("3:5", "Button - Primary"):
             with self.subTest(query=query):
                 out = self.text(query)
-                self.assertIn("instance `I668:3208;445:536` in Left sidebar > Footer", out)
-                self.assertIn("instance `815:4284` in Main > Container", out)
-                self.assertNotIn("instance `668:3208`", out)
+                self.assertIn("instance `I268:1208;245:136` in Left sidebar > Footer", out)
+                self.assertIn("instance `315:1284` in Main > Container", out)
+                self.assertNotIn("instance `268:1208`", out)
 
     def test_a_variant_id_covers_only_rows_naming_it(self):
         out = self.text("3:6")
-        self.assertIn("instance `701:10`", out)
-        self.assertNotIn("instance `815:4284`", out)
+        self.assertIn("instance `301:10`", out)
+        self.assertNotIn("instance `315:1284`", out)
 
     def test_top_level_and_nested_instances_print_their_subtrees_and_codegen(self):
         out = self.text("3:5")
-        self.assertIn('frames/mechanics.md:4: - `701:10` instance **Button - Primary** — 164×44', out)
-        self.assertIn('frames/mechanics.md:5: - override `I701:10;3:7` text **Button** — "Send to Story"', out)
+        self.assertIn('frames/checkout.md:4: - `301:10` instance **Button - Primary** — 164×44', out)
+        self.assertIn('frames/checkout.md:5: - override `I301:10;3:7` text **Button** — "Save draft"', out)
         self.assertNotIn("`900:1`", out)
-        self.assertIn('sets/left-sidebar.md:4: - `445:536` instance **Button - Primary**', out)
-        self.assertIn('sets/left-sidebar.md:5: - `I445:536;3:7` text **Button** — Inter 700 18/16; "Cast Roll"', out)
-        self.assertNotIn("`445:600`", out)
-        self.assertIn('design-context/mechanics.md:2: <button className="rounded-[8px]"', out)
-        self.assertIn('design-context/mechanics.md:3: <p className="text-[18px]"', out)
-        self.assertIn("design-context/mechanics.md: no codegen line for this instance", out)
+        self.assertIn('sets/left-sidebar.md:4: - `245:136` instance **Button - Primary**', out)
+        self.assertIn('sets/left-sidebar.md:5: - `I245:136;3:7` text **Button** — Inter 700 18/16; "Submit order"', out)
+        self.assertNotIn("`245:200`", out)
+        self.assertIn('design-context/checkout.md:2: <button className="rounded-[8px]"', out)
+        self.assertIn('design-context/checkout.md:3: <p className="text-[18px]"', out)
+        self.assertIn("design-context/checkout.md: no codegen line for this instance", out)
 
     def test_overrides_effects_and_unlisted_instances_are_named(self):
         out = self.text("3:5")
@@ -148,15 +148,15 @@ class DesignInstances(unittest.TestCase):
     def test_master_trees_print_in_sheet_order(self):
         out = self.text("3:5")
         self.assertLess(out.index("sets/button-primary.md:5: - `3:6` component"),
-                        out.index("sets/button-primary.md:10: - `3:10` component"))
+                        out.index("sets/button-primary.md:10: - `3:14` component"))
         self.assertIn("sets/button-primary.md:6: - `3:7` text **Button**", out)
 
     def test_frame_filter_and_missing_codegen_file(self):
         self.assertNotIn("## other", self.text("3:5"))
         self.assertIn("## other", self.text("3:5", frames=()))
         bare = build(Path(self.tmp.name) / "bare", codegen=False)
-        out = "\n".join(fi.report("3:5", bare, {"mechanics"}))
-        self.assertIn("design-context/mechanics.md: no file", out)
+        out = "\n".join(fi.report("3:5", bare, {"checkout"}))
+        self.assertIn("design-context/checkout.md: no file", out)
 
     def test_a_worktree_without_a_build_exits_2(self):
         with contextlib.redirect_stderr(io.StringIO()):

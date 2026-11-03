@@ -11,7 +11,7 @@ context clear: both are conversational acts no hook can capture. This is its wri
 Usage
 -----
     uv run --no-project .workflow/scripts/story_record.py append <story-id> "<fact>"
-    uv run --no-project .workflow/scripts/story_record.py append 7-2 "checkpoint-1 spec approved"
+    uv run --no-project .workflow/scripts/story_record.py append 7-92 "checkpoint-1 spec approved"
     uv run --no-project .workflow/scripts/story_record.py check  <story-id> <fact-key>
     uv run --no-project .workflow/scripts/story_record.py open   <story-id>
     uv run --no-project .workflow/scripts/story_record.py reach  <story-id>

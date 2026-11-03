@@ -51,15 +51,15 @@ class _WorktreeCase(unittest.TestCase):
 
     def setUp(self):
         self.root = te.enter(self, self.config)
-        self.wt = self.root / "worktrees" / "7-2"
+        self.wt = self.root / "worktrees" / "7-92"
         (self.wt / SPECS).mkdir(parents=True)
         (self.wt / ".git").write_text("gitdir: nowhere\n", encoding="utf-8")
         (self.root / SPECS).mkdir(parents=True)
         (self.root / SPECS / "slot-registry.md").write_text(
             "| Slot | Status | Story ID | Branch | Worktree | Since |\n"
             "|------|--------|----------|--------|----------|-------|\n"
-            f"| 3 | in_use | 7-2 | story/7-2 | {self.wt} | 2026-01-01 |\n", encoding="utf-8")
-        self.spec = self.wt / SPECS / "7-2-some-feature.md"
+            f"| 3 | in_use | 7-92 | story/7-92 | {self.wt} | 2026-01-01 |\n", encoding="utf-8")
+        self.spec = self.wt / SPECS / "7-92-some-feature.md"
         self.spec.write_text("# spec\n", encoding="utf-8")
 
     def rec(self, *argv):
@@ -71,42 +71,42 @@ class StoryRecordTests(_WorktreeCase):
 
     def test_checkpoint1_refused_while_an_open_question_stands(self):
         self.spec.write_text("# spec\nAC1 [OPEN-Q 1 which colour? (a), recommended]\n", encoding="utf-8")
-        code, out = self.rec("append", "7-2", "checkpoint-1 spec approved")
+        code, out = self.rec("append", "7-92", "checkpoint-1 spec approved")
         self.assertEqual(code, 1, out)
         self.assertIn("open items", out)
-        self.assertEqual(self.rec("open", "7-2")[0], 1)
-        code, out = self.rec("rule", "7-2", "1=b")
+        self.assertEqual(self.rec("open", "7-92")[0], 1)
+        code, out = self.rec("rule", "7-92", "1=b")
         self.assertEqual(code, 0, out)
         self.assertIn("OPEN-Q 1 which colour? (b)", self.spec.read_text(encoding="utf-8"))
-        self.assertEqual(self.rec("append", "7-2", "checkpoint-1 spec approved")[0], 0)
-        self.assertEqual(self.rec("check", "7-2", "checkpoint-1")[0], 0)
+        self.assertEqual(self.rec("append", "7-92", "checkpoint-1 spec approved")[0], 0)
+        self.assertEqual(self.rec("check", "7-92", "checkpoint-1")[0], 0)
 
     def test_rule_refuses_external_owner_multi_number_and_missing_markers(self):
         self.spec.write_text("# spec\n[OPEN-Q 1] (Designer) colour\n[OPEN-Q 2, 3] both\n", encoding="utf-8")
         before = self.spec.read_text(encoding="utf-8")
-        self.assertEqual(self.rec("rule", "7-2", "1=a")[0], 2)
-        self.assertEqual(self.rec("rule", "7-2", "2=a")[0], 2)
-        self.assertEqual(self.rec("rule", "7-2", "9=a")[0], 2)
-        self.assertEqual(self.rec("rule", "7-2", "1=a", "1=b")[0], 2)
+        self.assertEqual(self.rec("rule", "7-92", "1=a")[0], 2)
+        self.assertEqual(self.rec("rule", "7-92", "2=a")[0], 2)
+        self.assertEqual(self.rec("rule", "7-92", "9=a")[0], 2)
+        self.assertEqual(self.rec("rule", "7-92", "1=a", "1=b")[0], 2)
         self.assertEqual(before, self.spec.read_text(encoding="utf-8"), "a refused rule changed the spec")
 
     def test_incomplete_spec_draft_is_an_open_item(self):
-        self.rec("append", "7-2", "spec-draft incomplete (step-3)")
-        self.assertEqual(self.rec("open", "7-2")[0], 1)
-        self.rec("append", "7-2", "spec-draft complete (story-spec)")
-        self.assertEqual(self.rec("open", "7-2")[0], 0)
+        self.rec("append", "7-92", "spec-draft incomplete (step-3)")
+        self.assertEqual(self.rec("open", "7-92")[0], 1)
+        self.rec("append", "7-92", "spec-draft complete (story-spec)")
+        self.assertEqual(self.rec("open", "7-92")[0], 0)
 
     def test_duplicate_is_judged_against_the_latest_line_of_the_key(self):
-        self.rec("append", "7-2", "checkpoint-3 merge approved")
-        self.rec("append", "7-2", "checkpoint-3 approval withdrawn -- pre-merge gate exit 1")
-        self.assertEqual(self.rec("check", "7-2", "checkpoint-3")[0], 1, "a withdrawal did not un-satisfy")
-        self.rec("append", "7-2", "checkpoint-3 merge approved")
-        self.assertEqual(self.rec("check", "7-2", "checkpoint-3")[0], 0, "a same-day re-approval was dropped")
-        text = (self.wt / SPECS / "7-2-record.md").read_text(encoding="utf-8")
+        self.rec("append", "7-92", "checkpoint-3 merge approved")
+        self.rec("append", "7-92", "checkpoint-3 approval withdrawn -- pre-merge gate exit 1")
+        self.assertEqual(self.rec("check", "7-92", "checkpoint-3")[0], 1, "a withdrawal did not un-satisfy")
+        self.rec("append", "7-92", "checkpoint-3 merge approved")
+        self.assertEqual(self.rec("check", "7-92", "checkpoint-3")[0], 0, "a same-day re-approval was dropped")
+        text = (self.wt / SPECS / "7-92-record.md").read_text(encoding="utf-8")
         self.assertEqual(text.count("checkpoint-3 merge approved"), 2)
 
     def test_reach_is_skipped_without_frontend_prefixes(self):
-        code, out = self.rec("reach", "7-2")
+        code, out = self.rec("reach", "7-92")
         self.assertEqual(code, 0)
         self.assertIn("SKIPPED", out)
 
@@ -117,13 +117,13 @@ class ReachTests(_WorktreeCase):
     def test_reach_missing_when_the_spec_names_frontend_source(self):
         self.spec.write_text("# spec\nTouches web/src/pages/Home.jsx and web/src/pages/Home.test.jsx\n",
                              encoding="utf-8")
-        code, out = self.rec("reach", "7-2")
+        code, out = self.rec("reach", "7-92")
         self.assertEqual(code, 1, out)
         self.assertIn("web/src/pages/Home.jsx", out)
         self.assertNotIn("Home.test.jsx", out)
         self.spec.write_text("# spec\nweb/src/pages/Home.jsx\n\n## UI states and how each is reached\n",
                              encoding="utf-8")
-        self.assertEqual(self.rec("reach", "7-2")[0], 0)
+        self.assertEqual(self.rec("reach", "7-92")[0], 0)
 
 
 class LedgerUnitTests(unittest.TestCase):
@@ -179,22 +179,22 @@ class SeedAndHandoffTests(_WorktreeCase):
     def test_seed_acs_due_until_named(self):
         self.spec.write_text("# spec\n### AC1 — Seed: a\n### AC2 — Seed: b\n", encoding="utf-8")
         rec = ["- 2026-01-01 phase-2 tests GREEN -- a (exit 0)"]
-        self.assertEqual(story_ledger.seed_acs_due(str(self.wt), "7-2", rec), [1, 2])
+        self.assertEqual(story_ledger.seed_acs_due(str(self.wt), "7-92", rec), [1, 2])
         rec.append("- 2026-01-01 seed ACs implemented: AC1, AC2 (phase-2)")
-        self.assertEqual(story_ledger.seed_acs_due(str(self.wt), "7-2", rec), [])
-        self.assertIsNone(story_ledger.seed_acs_due(str(self.wt), "7-2", []))
+        self.assertEqual(story_ledger.seed_acs_due(str(self.wt), "7-92", rec), [])
+        self.assertIsNone(story_ledger.seed_acs_due(str(self.wt), "7-92", []))
 
     def test_triage_is_per_latest_recorded_round(self):
-        findings = self.wt / SPECS / "7-2-code-review-findings-2026-01-01.md"
+        findings = self.wt / SPECS / "7-92-code-review-findings-2026-01-01.md"
         findings.write_text("## Review round 1\n## Triage decisions\n### approved_patches\nnone\n"
                             "## Review round 2\n(no triage yet)\n", encoding="utf-8")
-        self.rec("append", "7-2", "review round 1 recorded")
+        self.rec("append", "7-92", "review round 1 recorded")
         rows = dict((r[0], r[1]) for r in story_ledger.handoff_state(
-            ["7-2"], story_ledger.read_record(["7-2"], str(self.wt / SPECS))[1], str(self.wt / SPECS)))
+            ["7-92"], story_ledger.read_record(["7-92"], str(self.wt / SPECS))[1], str(self.wt / SPECS)))
         self.assertTrue(rows["triage recorded"])
-        self.rec("append", "7-2", "review round 2 recorded")
+        self.rec("append", "7-92", "review round 2 recorded")
         rows = dict((r[0], r[1]) for r in story_ledger.handoff_state(
-            ["7-2"], story_ledger.read_record(["7-2"], str(self.wt / SPECS))[1], str(self.wt / SPECS)))
+            ["7-92"], story_ledger.read_record(["7-92"], str(self.wt / SPECS))[1], str(self.wt / SPECS)))
         self.assertFalse(rows["triage recorded"], "round 1's triage satisfied round 2")
 
 
@@ -211,15 +211,15 @@ class LandGuardGitTests(unittest.TestCase):
         git(self.root, "add", "-A")
         git(self.root, "commit", "-q", "-m", "base")
         self.wt = self.root.parent / f"{self.root.name}-wt"
-        git(self.root, "worktree", "add", "-q", "-b", "story/7-2", str(self.wt))
+        git(self.root, "worktree", "add", "-q", "-b", "story/7-92", str(self.wt))
         self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(self.wt)]))
         (self.wt / "app.py").write_text("x = 2\n", encoding="utf-8")
-        git(self.wt, "commit", "-qam", "feat: [Story 7-2] change")
+        git(self.wt, "commit", "-qam", "feat: [Story 7-92] change")
         (self.root / SPECS).mkdir(parents=True)
         (self.wt / SPECS).mkdir(parents=True)
         (self.root / SPECS / "slot-registry.md").write_text(
             "| Slot | Status | Story ID | Branch | Worktree | Since |\n|---|---|---|---|---|---|\n"
-            f"| 1 | in_use | 7-2 | story/7-2 | {self.wt} | 2026-01-01 |\n", encoding="utf-8")
+            f"| 1 | in_use | 7-92 | story/7-92 | {self.wt} | 2026-01-01 |\n", encoding="utf-8")
         self.arts = str(self.wt / SPECS)
 
     def green(self, tree: str, base: str) -> list[str]:
@@ -230,7 +230,7 @@ class LandGuardGitTests(unittest.TestCase):
         import run_scoped_tests
         tree = run_scoped_tests.tested_tree(str(self.wt))[1]
         base = git(self.root, "rev-parse", "development")[:12]
-        ok, why = story_ledger.premerge_verdict(self.green(tree, base), self.arts, "7-2")
+        ok, why = story_ledger.premerge_verdict(self.green(tree, base), self.arts, "7-92")
         self.assertIsNotNone(ok, why)
 
     def test_a_later_change_or_a_gate_input_moving_on_the_base_blocks(self):
@@ -239,29 +239,29 @@ class LandGuardGitTests(unittest.TestCase):
         base = git(self.root, "rev-parse", "development")[:12]
         (self.root / "docs" / "notes.md").write_text("n2\n", encoding="utf-8")
         git(self.root, "commit", "-qam", "docs only")
-        self.assertIsNotNone(story_ledger.premerge_verdict(self.green(tree, base), self.arts, "7-2")[0],
+        self.assertIsNotNone(story_ledger.premerge_verdict(self.green(tree, base), self.arts, "7-92")[0],
                              "a gate-inert base move blocked the land")
         (self.root / "lib.py").write_text("y = 1\n", encoding="utf-8")
         git(self.root, "add", "lib.py")
         git(self.root, "commit", "-qm", "code")
-        ok, why = story_ledger.premerge_verdict(self.green(tree, base), self.arts, "7-2")
+        ok, why = story_ledger.premerge_verdict(self.green(tree, base), self.arts, "7-92")
         self.assertIsNone(ok)
         self.assertIn("lib.py is read by the gate", why)
         tip = git(self.root, "rev-parse", "development")[:12]
         rec = self.green(tree, base) + [f"- 2026-01-02 pre-merge base accepted — development {tip} (owner)"]
-        self.assertIsNotNone(story_ledger.premerge_verdict(rec, self.arts, "7-2")[0])
+        self.assertIsNotNone(story_ledger.premerge_verdict(rec, self.arts, "7-92")[0])
         (self.wt / "app.py").write_text("x = 3\n", encoding="utf-8")
-        ok, why = story_ledger.premerge_verdict(self.green(tree, base), self.arts, "7-2")
+        ok, why = story_ledger.premerge_verdict(self.green(tree, base), self.arts, "7-92")
         self.assertIsNone(ok)
         self.assertIn("differs", why)
 
     def test_not_required_passes_and_a_train_branch_blocks(self):
         rec = ["- 2026-01-01 pre-merge gate not required — AGENTS.md: docs only"]
-        self.assertIsNotNone(story_ledger.premerge_verdict(rec, self.arts, "7-2")[0])
-        git(self.wt, "checkout", "-q", "-b", "train/7-2")
-        ok, why = story_ledger.premerge_verdict(rec, self.arts, "7-2")
+        self.assertIsNotNone(story_ledger.premerge_verdict(rec, self.arts, "7-92")[0])
+        git(self.wt, "checkout", "-q", "-b", "train/7-92")
+        ok, why = story_ledger.premerge_verdict(rec, self.arts, "7-92")
         self.assertIsNone(ok)
-        self.assertIn("check out story/7-2", why)
+        self.assertIn("check out story/7-92", why)
 
 
 class LandLeaseTests(unittest.TestCase):
@@ -280,7 +280,7 @@ class LandLeaseTests(unittest.TestCase):
         self.assertEqual(land_lease.take(self.path, "2-2")[0], "acquired")
         record = land_lease.read_record(self.path)
         self.assertEqual([e["story"] for e in record["line"]], ["3-3"])
-        self.assertEqual(land_lease.release(self.path, "9-9")[0], "held")
+        self.assertEqual(land_lease.release(self.path, "9-99")[0], "held")
 
     def test_train_state_and_dead_gate_release(self):
         land_lease.take(self.path, "1-1")
@@ -307,7 +307,7 @@ class MergeTrainUnitTests(unittest.TestCase):
     def test_ahead_of_and_stack_affecting(self):
         record = {"story": "1-1", "acquired": "x", "line": [{"story": "2-2"}, {"story": "3-3"}]}
         self.assertEqual(merge_train.ahead_of("3-3", record), ["1-1", "2-2"])
-        self.assertIsNone(merge_train.ahead_of("9-9", record))
+        self.assertIsNone(merge_train.ahead_of("9-99", record))
         self.assertEqual(merge_train._stack_affecting(["src/a.py", "pkg/migrations/0001.py"]), "pkg/migrations/0001.py")
         self.assertEqual(merge_train._stack_affecting(["uv.lock"]), "uv.lock")
         self.assertEqual(merge_train._stack_affecting(["Dockerfile.base"]), "Dockerfile.base")
@@ -316,11 +316,11 @@ class MergeTrainUnitTests(unittest.TestCase):
     def test_delete_train_removes_the_refs(self):
         git(self.root, "init", "-q", "-b", "development")
         git(self.root, "commit", "-q", "--allow-empty", "-m", "base")
-        git(self.root, "branch", "train/7-2")
-        git(self.root, "update-ref", "refs/train-tested/7-2", "HEAD")
-        deleted = merge_train.delete_train(self.root, "story/7-2")
-        self.assertEqual(sorted(deleted), ["refs/heads/train/7-2", "refs/train-tested/7-2"])
-        self.assertEqual(merge_train.delete_train(self.root, "story/7-2"), [])
+        git(self.root, "branch", "train/7-92")
+        git(self.root, "update-ref", "refs/train-tested/7-92", "HEAD")
+        deleted = merge_train.delete_train(self.root, "story/7-92")
+        self.assertEqual(sorted(deleted), ["refs/heads/train/7-92", "refs/train-tested/7-92"])
+        self.assertEqual(merge_train.delete_train(self.root, "story/7-92"), [])
 
 
 class SprintStatusTests(unittest.TestCase):
@@ -328,30 +328,30 @@ class SprintStatusTests(unittest.TestCase):
         self.root = te.enter(self, "")
         self.path = self.root / "ss.yaml"
         self.path.write_text("last_updated: 2026-01-01  # n\ndevelopment_status:\n"
-                             "  7-1-alpha: done  # MERGED\n  7-2-beta: in-progress  # STARTED slot 1\n"
+                             "  7-91-alpha: done  # MERGED\n  7-92-beta: in-progress  # STARTED slot 1\n"
                              "  epic-7: in-progress\n", encoding="utf-8")
 
     def ss(self, *argv):
         return quiet(sprint_status.main, ["--path", str(self.path), *argv])
 
     def test_get_many_brief_and_unknown_key(self):
-        code, out = self.ss("get", "7-1", "7-9", "7-2", "--brief")
+        code, out = self.ss("get", "7-91", "7-99", "7-92", "--brief")
         self.assertEqual(code, 2)
         lines = [ln for ln in out.splitlines() if ln.strip()]
-        self.assertEqual(lines[0], "7-1-alpha: done | MERGED")
-        self.assertTrue(lines[1].startswith("7-9: ERROR"))
-        self.assertEqual(lines[2], "7-2-beta: in-progress | STARTED slot 1")
+        self.assertEqual(lines[0], "7-91-alpha: done | MERGED")
+        self.assertTrue(lines[1].startswith("7-99: ERROR"))
+        self.assertEqual(lines[2], "7-92-beta: in-progress | STARTED slot 1")
 
     def test_list_filters_and_empty_note_clears(self):
         code, out = self.ss("list", "--exclude-status", "done", "--exclude-epics", "--match", "slot", "--notes")
         self.assertEqual(code, 0)
-        self.assertIn("7-2-beta: in-progress | STARTED slot 1", out)
-        self.assertNotIn("7-1-alpha", out)
-        self.assertEqual(self.ss("set", "7-2", "review", "--note", "")[0], 0)
-        self.assertIn("  7-2-beta: review\n", self.path.read_text(encoding="utf-8"))
+        self.assertIn("7-92-beta: in-progress | STARTED slot 1", out)
+        self.assertNotIn("7-91-alpha", out)
+        self.assertEqual(self.ss("set", "7-92", "review", "--note", "")[0], 0)
+        self.assertIn("  7-92-beta: review\n", self.path.read_text(encoding="utf-8"))
 
     def test_history_append_with_swapped_arguments(self):
-        code, out = self.ss("history", "some text", "--append", "7-2")
+        code, out = self.ss("history", "some text", "--append", "7-92")
         self.assertEqual(code, 0, out)
         self.assertIn('"argument_order": "swapped"', out)
 
@@ -389,13 +389,13 @@ class BranchOverlapAndRefsTests(unittest.TestCase):
         self.assertEqual(branch_overlap.predicted_conflicts(out), {"f.py"})
 
     def test_story_ref_boundaries(self):
-        s = story_refs.Story("7-5", "7-5-some-slug")
-        self.assertTrue(s.pattern.search("see 7-5 and 7.5"))
-        self.assertTrue(s.pattern.search("7-5-some-slug"))
+        s = story_refs.Story("7-95", "7-95-some-slug")
+        self.assertTrue(s.pattern.search("see 7-95 and 7.95"))
+        self.assertTrue(s.pattern.search("7-95-some-slug"))
         self.assertFalse(s.pattern.search("7-5-6"))
         self.assertFalse(s.pattern.search("2026-07-5"))
         self.assertFalse(s.pattern.search("file.py:7-5"))
-        self.assertTrue(s.owns(Path("story-7-5.md")))
+        self.assertTrue(s.owns(Path("story-7-95.md")))
         self.assertFalse(s.owns(Path("7-5-6-other.md")))
 
 

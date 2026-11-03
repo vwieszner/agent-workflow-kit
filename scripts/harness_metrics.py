@@ -97,10 +97,10 @@ is the separate `$ est` column and is never folded into measured $.
 
 Usage
 -----
-    uv run --no-project .workflow/scripts/harness_metrics.py --story 8-47 --story 8-30
-    uv run --no-project .workflow/scripts/harness_metrics.py --story 6-20 --json > metrics.json
-    uv run --no-project .workflow/scripts/harness_metrics.py --story 6-20 --dedicated-share 0.8
-    uv run --no-project .workflow/scripts/harness_metrics.py --story 16-17 --story 3-2 --summary \
+    uv run --no-project .workflow/scripts/harness_metrics.py --story 8-947 --story 8-930
+    uv run --no-project .workflow/scripts/harness_metrics.py --story 6-920 --json > metrics.json
+    uv run --no-project .workflow/scripts/harness_metrics.py --story 6-920 --dedicated-share 0.8
+    uv run --no-project .workflow/scripts/harness_metrics.py --story 16-917 --story 3-2 --summary \
         --cut af181f31 --cut story-propagate=2026-10-07T19:56:39Z
 
 Claude Code transcripts only. Read-only. Exit 0 on a report (even with no sessions found); 1 when
@@ -1009,7 +1009,7 @@ def cross_story(reps: list[dict], cuts: dict) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--story", action="append", required=True, help="story id (8-47, 7.5.11); repeatable")
+    ap.add_argument("--story", action="append", required=True, help="story id (8-947, 7.5.11); repeatable")
     out = ap.add_mutually_exclusive_group()
     out.add_argument("--json", action="store_true", help="machine output instead of markdown")
     out.add_argument("--summary", action="store_true",

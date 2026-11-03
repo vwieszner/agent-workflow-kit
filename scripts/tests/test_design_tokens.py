@@ -27,8 +27,8 @@ PAYLOAD = {
     "file": "LIBRARY-FILE",
     "collections": [["VariableCollectionId:1:1", "Primitives", [["1:0", "Mode 1"]], "1:0"]],
     "variables": [
-        ["VariableID:1:2", "cyan/500", "COLOR", "VariableCollectionId:1:1", {"1:0": "#00F0FF"}, [], ""],
-        ["VariableID:1:1", "charcoal/900", "COLOR", "VariableCollectionId:1:1", {"1:0": "#161B22"}, [], "café \U0001f3b2"],
+        ["VariableID:1:2", "cyan/500", "COLOR", "VariableCollectionId:1:1", {"1:0": "#22AA88"}, [], ""],
+        ["VariableID:1:1", "charcoal/900", "COLOR", "VariableCollectionId:1:1", {"1:0": "#1E1E1E"}, [], "café \U0001f33f"],
     ],
     "text": [],
     "effect": [],
@@ -207,7 +207,7 @@ class ExportTests(unittest.TestCase):
 
     def test_a_chunk_cut_between_the_halves_of_a_surrogate_pair_survives_the_export(self):
         text = json.dumps(PAYLOAD, ensure_ascii=False)
-        size = utf16_length(text[: text.index("\U0001f3b2")]) + 1
+        size = utf16_length(text[: text.index("\U0001f33f")]) + 1
         pieces = split_utf16(text, size)
         self.assertTrue(any(piece.endswith("\ud83c") for piece in pieces))
         lines = [tool_result_line(chunk("t1", i, len(pieces), utf16_length(text), piece)) for i, piece in enumerate(pieces)]

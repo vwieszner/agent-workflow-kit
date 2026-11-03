@@ -23,7 +23,7 @@ Usage from a sibling script:
 CLI (for skills/prose that need a value):
   uv run --no-project .workflow/scripts/wfconfig.py get git.base_branch
   uv run --no-project .workflow/scripts/wfconfig.py ports 3
-  uv run --no-project .workflow/scripts/wfconfig.py render "{compose} -p {stack} ps" --story-id 7-2
+  uv run --no-project .workflow/scripts/wfconfig.py render "{compose} -p {stack} ps" --story-id 7-92
 """
 from __future__ import annotations
 

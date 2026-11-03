@@ -206,12 +206,12 @@ def check(md: str, exp: Export, show_all: bool) -> int:
     def token_row(table: str, tok: str, prim: str | None, val: str) -> None:
         named.add(tok)
         if tok not in exp.vars:
-            report(table, False, f"{tok}: MISSING in export (Confluence {prim or '-'} = {val})")
+            report(table, False, f"{tok}: MISSING in export (doc {prim or '-'} = {val})")
             return
         a, r = exp.alias(tok), norm_export(exp.resolve(tok))
         want_alias = prim[6:] if prim and prim.startswith("color/") else prim
         ok = (prim is None or a == want_alias) and r == norm_value(val)
-        report(table, ok, f"{tok}: Confluence {prim or '-'} = {norm_value(val)} | export {a or '-'} = {r}")
+        report(table, ok, f"{tok}: doc {prim or '-'} = {norm_value(val)} | export {a or '-'} = {r}")
 
     for m in TABLE_ROW_RE.finditer(sec):
         token_row(token_table(m.group(1)), m.group(1), m.group(2), m.group(3))
@@ -233,7 +233,7 @@ def check(md: str, exp: Export, show_all: bool) -> int:
         got = (t[2], t[3], f"{t[4]:g}", pixel_line_height(t[5]))
         want = (family.strip(), weight, size, line)
         same = (got[0] == want[0] and norm_weight(got[1]) == norm_weight(want[1]) and got[2:] == want[2:])
-        report("text style", same, f"{name}: Confluence {want} | export {got}")
+        report("text style", same, f"{name}: doc {want} | export {got}")
 
     for name, kind, x, y, blur, spread, hexv, pct in effect_rows:
         e = exp.effect.get(name)
@@ -244,7 +244,7 @@ def check(md: str, exp: Export, show_all: bool) -> int:
         layers = e[2]
         got = ([layers[0][0], norm_export(layers[0][1])] + [f"{n:g}" for n in layers[0][2:6]]
                if len(layers) == 1 else [f"{len(layers)} layers"])
-        report("effect style", got == want, f"{name}: Confluence {want} | export {got}")
+        report("effect style", got == want, f"{name}: doc {want} | export {got}")
 
     only = ([n for n in exp.semantic if n not in named]
             + [f"text:{n}" for n in exp.text if n not in {r[0] for r in text_rows}]

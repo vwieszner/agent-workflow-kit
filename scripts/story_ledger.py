@@ -186,7 +186,7 @@ def _abs(p: str) -> str:
 # ------------------------------------------------------------------ id matching
 
 def variants(story_id: str) -> list[str]:
-    """7-20b -> ['7-20b', '7.20b']; 10.7 -> ['10-7', '10.7']."""
+    """7-920b -> ['7-920b', '7.920b']; 10.97 -> ['10-97', '10.97']."""
     a = story_id.strip()
     out = {a, a.replace(".", "-"), a.replace("-", ".")}
     return sorted(out)
@@ -197,9 +197,9 @@ def mentions(text: str, vs: list[str]) -> bool:
 
     The id must not be preceded or followed by another id character, where `-`/`.`
     count as a boundary only when no DIGIT follows them: a digit after `-`/`.`
-    continues the id (`7-5` must not match `7-5-11`); a letter after `-` starts a slug
-    (`7-21-session-summary`) and still matches. A character attached directly also
-    continues the id, so `7-20` does not match `7-20b`.
+    continues the id (`7-95` must not match `7-95-11`); a letter after `-` starts a slug
+    (`7-921-login-form`) and still matches. A character attached directly also
+    continues the id, so `7-920` does not match `7-920b`.
     """
     t = (text or "").lower()
     for v in vs:
@@ -1222,7 +1222,7 @@ def _is_spec(path: str) -> bool:
 
 def _spec_path(vs: list[str], arts: str) -> str | None:
     """The story's spec under `arts`: the first `<id>*.md` that is a spec (`_is_spec`) and names the story at an
-    id boundary (`mentions`), so `6` never reads `60-*.md` and `9-3` never reads `9-3-1-*.md`."""
+    id boundary (`mentions`), so `6` never reads `60-*.md` and `9-93` never reads `9-93-1-*.md`."""
     for v in vs:
         for p in sorted(glob.glob(os.path.join(glob.escape(arts), f"{v}*.md"))):
             if _is_spec(p) and mentions(os.path.basename(p), vs):

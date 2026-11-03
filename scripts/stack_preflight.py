@@ -29,7 +29,7 @@ check runs.
 
 Usage:
   uv run --no-project .workflow/scripts/stack_preflight.py --project-name story-7-50 \
-      --worktree <worktree path> [--expected-branch story/7-50] [--slot N]
+      --worktree <worktree path> [--expected-branch story/7-950] [--slot N]
   uv run --no-project .workflow/scripts/stack_preflight.py --project-name <config: slots.shared_stack_name>
       (shared stack: --worktree defaults to the repo root, branch to config: git.base_branch)
 

@@ -12,9 +12,9 @@ Comment what the code cannot state itself: an invariant and what pins it, a non-
 - ❌ "added 2026-05-02 during the F-11 audit"
 - ❌ "lands in this close-out because the other story is already merged"
 - ❌ "patch for finding V12 — reviewer flagged this as a race"
-- ❌ story/AC tags — `(Story 7.14a AC1)`, `# AC3: validate the id here`
+- ❌ story/AC tags — `(Story 7.914a AC1)`, `# AC3: validate the id here`
 - ❌ a comment restating what the next line does
 
 Narrative, dates, audit names, finding ids, story/AC tags, and which branch a change landed in go to `config: paths.story_history_dir`/`<key>.md`, the spec's in-flight capture section, or the per-story deferred-work file — never into source. A patch manifest's `notes` column is input to the patch, not text to transcribe as a comment.
 
-**Test files are exempt from the story/AC-tag ban — that ban only.** A test module docstring naming the AC it encodes (`Story 7-51 AC5.1 — …`, `spec AC2`) says what the module is for. Dates, audit names and finding ids stay banned in tests. Never strip such a tag, and never raise one as a finding.
+**Test files are exempt from the story/AC-tag ban — that ban only.** A test module docstring naming the AC it encodes (`Story 7-951 AC5.1 — …`, `spec AC2`) says what the module is for. Dates, audit names and finding ids stay banned in tests. Never strip such a tag, and never raise one as a finding.

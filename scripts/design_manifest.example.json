@@ -8,12 +8,12 @@
     "frames": [
       {
         "slug": "dashboard-empty",
-        "node": "10:290",
+        "node": "12:34",
         "ticket": "<optional ticket key>"
       },
       {
         "slug": "dashboard-populated",
-        "node": "668:3199"
+        "node": "56:78"
       }
     ]
   },

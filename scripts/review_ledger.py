@@ -55,7 +55,7 @@ HALT_SUBJECT = r"^wip: \[Story {id}\] auto-loop halted in (\S+)\s*$"
 
 
 def variants(story_id: str) -> list[str]:
-    """7-20b -> ['7-20b', '7.20b']; 10.7 -> ['10-7', '10.7']."""
+    """7-920b -> ['7-920b', '7.920b']; 10.97 -> ['10-97', '10.97']."""
     a = story_id.strip()
     return sorted({a, a.replace(".", "-"), a.replace("-", ".")})
 

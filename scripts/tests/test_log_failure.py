@@ -23,7 +23,7 @@ worktrees_root = "../wt"
 auto_dev_failure_log = "logs/failures.md"
 """
 
-ARGS = ["--story-id", "7-2", "--branch-name", "7-2", "--failure-step", "story-impl",
+ARGS = ["--story-id", "7-92", "--branch-name", "7-92", "--failure-step", "story-impl",
         "--failure-summary", "Tests failed after 5 rounds.", "--mutex-timeout-ms", "500"]
 
 
@@ -45,13 +45,13 @@ class LogFailureTests(unittest.TestCase):
         self.assertEqual(Path(res["file"]), log)
         body = log.read_text(encoding="utf-8")
         self.assertTrue(body.startswith("# Auto-Dev Loop — Permanent Failures"))
-        self.assertIn("- branch: feat/7-2 (PRESERVED", body)
+        self.assertIn("- branch: feat/7-92 (PRESERVED", body)
         self.assertIn("- wip_commit: abc1234", body)
         self.assertIn("FAIL: x", body)
-        self.assertIn("/wt/7-2`, branch `feat/7-2`", body)
-        self.assertIn("resume_halted.py 7-2 --ruling", body)
+        self.assertIn("/wt/7-92`, branch `feat/7-92`", body)
+        self.assertIn("resume_halted.py 7-92 --ruling", body)
         self._main()
-        self.assertEqual(log.read_text(encoding="utf-8").count("## 7-2 — "), 2)
+        self.assertEqual(log.read_text(encoding="utf-8").count("## 7-92 — "), 2)
         self.assertEqual(log.read_text(encoding="utf-8").count("# Auto-Dev Loop"), 1)
 
     def test_held_mutex_times_out_with_error_json(self):

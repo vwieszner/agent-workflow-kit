@@ -103,7 +103,7 @@ def resolve_worktree(story_id: str, worktree_root: Path):
             return row["slot"], row["branch"] or wfconfig.branch_name(story_id), wt
     # Fallback (registry row already free): ONLY the dir named exactly <id>, and only when
     # git registers it on this story's branch. A prefix match would reach a sibling story
-    # (`5` → `5-1`) and delete its worktree and branch.
+    # (`5` → `5-91`) and delete its worktree and branch.
     branch = wfconfig.branch_name(story_id)
     cand = worktree_root / story_id
     if not cand.exists():

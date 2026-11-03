@@ -28,7 +28,7 @@ CASES = [
     ("status sweep referencing review history", 0,
      agent("Read-only status check: does the story file have a Review Findings section? Report what you find.")),
     ("typed story-impl saying do NOT run code review", 0,
-     agent("Implement story 7-40. Do NOT run code review and do NOT merge.", "story-impl")),
+     agent("Implement story 7-940. Do NOT run code review and do NOT merge.", "story-impl")),
     ("unrelated 'do not' before a real trigger still blocks", 2,
      agent("Do not edit files. Run a code review of the diff and report what you find.")),
     ("layer name only, untyped", 2, agent("You are the Blind Hunter. Examine the committed diff.")),

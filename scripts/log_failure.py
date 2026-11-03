@@ -11,7 +11,7 @@ holds the same mutex. Creates the file with its header on first use.
 
 Usage:
   uv run --no-project .workflow/scripts/log_failure.py \
-    --story-id 7-5 --branch-name 7-5 \
+    --story-id 7-95 --branch-name 7-95 \
     --failure-step story-impl \
     --failure-summary "Tests failed after 5 batch-fix rounds." \
     [--wip-commit abc1234] [--last-test-output "...tail 30..."] \

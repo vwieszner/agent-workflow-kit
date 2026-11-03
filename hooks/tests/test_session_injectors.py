@@ -20,7 +20,7 @@ class InjectStoryLedgerTests(HookTestCase):
     REGISTRY = (
         "| Slot | Status | Story | Branch |\n|---|---|---|---|\n"
         "| 0 | shared | — | development |\n| 1 | free | — | — |\n"
-        "| 2 | in-use | 7-21 | story/7-21 |\n| 3 | reserved | 9-10 | — |\n"
+        "| 2 | in-use | 7-921 | story/7-921 |\n| 3 | reserved | 9-910 | — |\n"
     )
 
     def test_in_flight_parsing(self):
@@ -28,8 +28,8 @@ class InjectStoryLedgerTests(HookTestCase):
         reg = self.root / "docs" / "slot-registry.md"
         reg.parent.mkdir(parents=True)
         reg.write_text(self.REGISTRY, encoding="utf-8")
-        self.assertEqual([("0", "—"), ("2", "7-21"), ("3", "9-10")][1:], mod.in_flight(reg, 6))
-        self.assertEqual([("2", "7-21")], mod.in_flight(reg, 1))
+        self.assertEqual([("0", "—"), ("2", "7-921"), ("3", "9-910")][1:], mod.in_flight(reg, 6))
+        self.assertEqual([("2", "7-921")], mod.in_flight(reg, 1))
 
     def test_silent_when_registry_missing(self):
         p = self.run_hook(SESSION / "inject_story_ledger.py", "{}")

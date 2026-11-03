@@ -36,7 +36,7 @@ import _state_testenv as te  # noqa: E402
 import token_doc_check as ctc  # noqa: E402
 
 CONFIG = '''[design]
-token_doc_start = "# Design System & Design Tokens"
+token_doc_start = "# Token Reference"
 token_doc_end = "### Accessibility Requirements"
 token_required_tables = ["radius table", "spacing table", "colour table", "border-width bullet", "size bullet", "space primitive", "text style", "effect style"]
 '''
@@ -46,11 +46,11 @@ MIRROR = """\
 
 Some text.
 
-# Design System & Design Tokens (Figma Variables & Styles)
+# Token Reference (Variables & Styles)
 
 ## 2. Corner Radius Tokens
 
-| Semantic Token | Primitive Alias | Value | Role / Target Context |
+| Token | Alias | Value | Usage |
 | --- | --- | --- | --- |
 | `radius/control` | `radius/8` | `8px` | Interactive controls. |
 
@@ -58,20 +58,20 @@ Some text.
 
 `space/0` (0px), `space/8` (8px).
 
-| Semantic Token | Primitive Alias | Value | Role / Context |
+| Token | Alias | Value | Notes |
 | --- | --- | --- | --- |
 | `space/control-y` | `space/8` | `8px` | Vertical padding. |
 
 ## 4. Color Tokens
 
-- **text/nav-active:** Add token role: `amber/500` (`#FF8C00`) — Active tab labels.
+- **text/nav-active:** Add token role: `blue/500` (`#3366CC`) — Active tab labels.
 
-| Semantic Token | Primitive Alias | Value | Role / Description |
+| Token | Base | Value | Purpose |
 | --- | --- | --- | --- |
 | **Surfaces** |  |  |  |
 | `surface/hover-neutral` | `color/alpha/white-5` | `#FFFFFF` @ `5%` | Translucent hover overlay. |
 | `surface/hover-danger` | `color/alpha/crimson-5` | `#`B91C1C@ `5%` | Crimson hover overlay. |
-| `border/focus` | `color/amber/500` | `#FF8C00` | Active input focus rings. |
+| `border/focus` | `color/blue/500` | `#3366CC` | Active input focus rings. |
 
 ## 5. Sizes & Border Widths
 
@@ -80,15 +80,15 @@ Some text.
 
 ## 6. Typography Scale (Text Styles)
 
-| Text Style | Font Family | Weight | Size | Line Height | Role / Context |
+| Style | Family | Weight | Size | Leading | Usage |
 | --- | --- | --- | --- | --- | --- |
 | `control/label` | Inter | SemiBold (600) | `14px` | `20px` | Standard button labels. |
 | `control/label-sm` | Inter | Semi Bold (600) | `12px` | `16px` | Compact labels. |
 | `display/heavy` | Newsreader | Extra Bold | `48px` | `56px` | Heavy hero. |
 
-## 7. Elevation & Shadows (Effect Styles)
+## 7. Shadows (Effect Styles)
 
-| Effect Style | Type | Values (X, Y, Blur, Spread) | Color & Opacity | Role / Description |
+| Effect | Kind | Offsets and blur | Colour | Usage |
 | --- | --- | --- | --- | --- |
 | `Elevation/Standard` | Drop shadow | `X: 0, Y: 4, Blur: 24, Spread: 0` | `#000000` @ `50%` | Resting shadow. |
 
@@ -115,10 +115,10 @@ EXPORT = {
     "variables": [
         var("radius/8", P, 8), var("radius/control", S, "alias:radius/8"),
         var("space/0", P, 0), var("space/8", P, 8), var("space/control-y", S, "alias:space/8"),
-        var("amber/500", P, "#FF8C00"), var("text/nav-active", S, "alias:amber/500"),
+        var("blue/500", P, "#3366CC"), var("text/nav-active", S, "alias:blue/500"),
         var("alpha/white-5", P, "#FFFFFF@0.05"), var("surface/hover-neutral", S, "alias:alpha/white-5"),
         var("alpha/crimson-5", P, "#b91c1c@0.05"), var("surface/hover-danger", S, "alias:alpha/crimson-5"),
-        var("border/focus", S, "alias:amber/500"),
+        var("border/focus", S, "alias:blue/500"),
         var("border-width/default", S, 1), var("size/icon-sm", S, 16),
         var("orange/900", P, "#331100"),
     ],
@@ -172,22 +172,22 @@ class TokenCheck(unittest.TestCase):
     def test_normalised_forms_match(self):
         rc, out = self.run_check(show_all=True)
         self.assertEqual(0, rc, out)
-        for row in ("ok       [colour table] surface/hover-neutral: Confluence color/alpha/white-5 = #FFFFFF@5% "
+        for row in ("ok       [colour table] surface/hover-neutral: doc color/alpha/white-5 = #FFFFFF@5% "
                     "| export alpha/white-5 = #FFFFFF@5%",
-                    "ok       [colour table] surface/hover-danger: Confluence color/alpha/crimson-5 = #B91C1C@5% "
+                    "ok       [colour table] surface/hover-danger: doc color/alpha/crimson-5 = #B91C1C@5% "
                     "| export alpha/crimson-5 = #B91C1C@5%",
-                    "ok       [colour table] border/focus: Confluence color/amber/500 = #FF8C00",
-                    "ok       [text style] control/label: Confluence ('Inter', 'SemiBold', '14', '20') "
+                    "ok       [colour table] border/focus: doc color/blue/500 = #3366CC",
+                    "ok       [text style] control/label: doc ('Inter', 'SemiBold', '14', '20') "
                     "| export ('Inter', 'Semi Bold', '14', '20')",
-                    "ok       [text style] control/label-sm: Confluence ('Inter', 'Semi Bold', '12', '16')",
-                    "ok       [text style] display/heavy: Confluence ('Newsreader', 'Extra Bold', '48', '56')"):
+                    "ok       [text style] control/label-sm: doc ('Inter', 'Semi Bold', '12', '16')",
+                    "ok       [text style] display/heavy: doc ('Newsreader', 'Extra Bold', '48', '56')"):
             self.assertIn(row, out)
 
     def test_each_changed_form_is_one_mismatch_and_exit_1(self):
         cases = {
             "radius table": ("| `radius/8` | `8px` |", "| `radius/8` | `9px` |"),
             "spacing table": ("| `space/8` | `8px` | Vertical", "| `space/8` | `10px` | Vertical"),
-            "colour note": ("(`#FF8C00`) — Active", "(`#FF8C01`) — Active"),
+            "colour note": ("(`#3366CC`) — Active", "(`#3366CD`) — Active"),
             "colour table": ("`#FFFFFF` @ `5%`", "`#FFFFFF` @ `6%`"),
             "border-width bullet": ("`1px`", "`2px`"),
             "size bullet": ("`16px`**", "`18px`**"),
@@ -205,19 +205,19 @@ class TokenCheck(unittest.TestCase):
 
     def test_a_differing_alias_with_the_same_value_is_a_mismatch(self):
         doc = copy.deepcopy(EXPORT)
-        doc["variables"].append(var("amber/main", P, "#FF8C00"))
-        doc["variables"] = [var("border/focus", S, "alias:amber/main") if v[1] == "border/focus" else v
+        doc["variables"].append(var("blue/main", P, "#3366CC"))
+        doc["variables"] = [var("border/focus", S, "alias:blue/main") if v[1] == "border/focus" else v
                             for v in doc["variables"]]
         rc, out = self.run_check(export=doc)
         self.assertEqual(1, rc, out)
-        self.assertIn("MISMATCH [colour table] border/focus: Confluence color/amber/500 = #FF8C00 "
-                      "| export amber/main = #FF8C00", out)
+        self.assertIn("MISMATCH [colour table] border/focus: doc color/blue/500 = #3366CC "
+                      "| export blue/main = #3366CC", out)
 
     def test_token_missing_from_export(self):
         doc = self.export_with(variables=[v for v in EXPORT["variables"] if v[1] != "border/focus"])
         rc, out = self.run_check(export=doc)
         self.assertEqual(1, rc, out)
-        self.assertIn("MISMATCH [colour table] border/focus: MISSING in export (Confluence color/amber/500 = `#FF8C00`)",
+        self.assertIn("MISMATCH [colour table] border/focus: MISSING in export (doc color/blue/500 = `#3366CC`)",
                       out)
 
     def test_unnamed_semantic_text_and_effect_are_export_only_and_exit_1(self):
@@ -268,7 +268,7 @@ class TokenCheck(unittest.TestCase):
 
     def test_colour_notes_may_be_absent(self):
         rc, out = self.run_check(self.replace(
-            "- **text/nav-active:** Add token role: `amber/500` (`#FF8C00`) — Active tab labels.\n", ""))
+            "- **text/nav-active:** Add token role: `blue/500` (`#3366CC`) — Active tab labels.\n", ""))
         self.assertEqual(1, rc, out)
         self.assertIn("colour note 0", out)
         self.assertIn("EXPORT-ONLY (1): text/nav-active", out)
@@ -278,8 +278,8 @@ class TokenCheck(unittest.TestCase):
         two_modes["variables"][0][4]["m:x"] = 9
         cases = {
             "two modes": (MIRROR, json.dumps(two_modes), "has 2 modes"),
-            "no start": (self.replace("# Design System & Design Tokens", "# Design Tokens"), None, "lacks"),
-            "start not at a line start": (self.replace("# Design System & Design Tokens", "x # Design System & Design Tokens"),
+            "no start": (self.replace("# Token Reference", "# Design Tokens"), None, "lacks"),
+            "start not at a line start": (self.replace("# Token Reference", "x # Token Reference"),
                                           None, "lacks"),
             "no end": (self.replace("### Accessibility Requirements", "### Accessibility"), None, "lacks"),
             "end only before start": (

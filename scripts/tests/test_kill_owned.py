@@ -39,7 +39,7 @@ MAIN = "/work/proj"
 WT = f"{ROOT}/cr-7"
 T0 = 1_760_600_000.0
 SINCE = datetime.fromtimestamp(T0, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-GATE_CMD = "uv run --no-project scripts/run_full_suite.py --story-id 8-34a --record"
+GATE_CMD = "uv run --no-project scripts/run_full_suite.py --story-id 8-934a --record"
 DISCOVER = "python.exe -m unittest discover -s scripts/tests -p test_*.py -t ."
 WATCH_CMD = r"C:\Program Files\Docker\docker.exe compose -p story-cr-7 watch"
 
@@ -66,7 +66,7 @@ class ContainmentTests(unittest.TestCase):
 
     def test_a_longer_sibling_name_is_not_inside(self):
         self.assertFalse(ko.inside(f"{ROOT}/ab-59/src", f"{ROOT}/ab-5"))
-        self.assertFalse(ko.inside(f"{ROOT}/8-34a", f"{ROOT}/8-34"))
+        self.assertFalse(ko.inside(f"{ROOT}/8-934a", f"{ROOT}/8-934"))
 
     def test_the_worktree_root_is_not_inside_the_main_checkout(self):
         self.assertFalse(ko.inside(f"{ROOT}/x", MAIN))
@@ -99,7 +99,7 @@ class OwnershipRuleTests(unittest.TestCase):
     def test_a_process_under_another_stacks_gate_is_refused_even_inside_the_callers_worktree(self):
         gate = row(35344, MAIN, cmdline=GATE_CMD, ppid=1)
         text = "; ".join(reasons(row(100, WT, cmdline=DISCOVER, ppid=35344), ancestors=[gate]))
-        self.assertIn("story-8-34a", text)
+        self.assertIn("story-8-934a", text)
         self.assertIn("run_full_suite.py", text)
         self.assertIn("35344", text)
 
@@ -144,7 +144,7 @@ class OwnershipRuleTests(unittest.TestCase):
         gate = row(35344, MAIN, cmdline=GATE_CMD, ppid=1)
         text = "; ".join(reasons(row(100, WT, ppid=50), ancestors=[hidden, gate]))
         self.assertIn("ancestor 50 unreadable", text)
-        self.assertIn("under story-8-34a's run_full_suite.py pid 35344", text)
+        self.assertIn("under story-8-934a's run_full_suite.py pid 35344", text)
 
     def test_a_compose_watch_is_refused_in_pid_mode_pointing_at_watch_mode(self):
         text = "; ".join(reasons(row(100, f"{WT}/src", cmdline=WATCH_CMD, name="docker.exe")))
@@ -171,14 +171,14 @@ class CrossStackReplayTests(unittest.TestCase):
 
     def test_stopping_another_stacks_gate_is_refused_whole(self):
         gate = row(35344, MAIN, cmdline=GATE_CMD, name="python.exe", ppid=1, created=T0 - 300)
-        pair_a = row(33652, f"{ROOT}/8-34a", cmdline=DISCOVER, ppid=35344, created=T0 - 290)
-        pair_b = row(33932, f"{ROOT}/8-34a", cmdline=DISCOVER, ppid=33652, created=T0 - 290)
+        pair_a = row(33652, f"{ROOT}/8-934a", cmdline=DISCOVER, ppid=35344, created=T0 - 290)
+        pair_b = row(33932, f"{ROOT}/8-934a", cmdline=DISCOVER, ppid=33652, created=T0 - 290)
         ancestors = {33652: [gate], 33932: [pair_a, gate], 35344: []}
         verdicts = ko.decide([pair_a, pair_b, gate], owner(since=T0 - 600), ancestors, frozenset())
         self.assertTrue(all(not v.owned for v in verdicts), [v.reasons for v in verdicts])
         text = {v.row["pid"]: "; ".join(v.reasons) for v in verdicts}
-        self.assertIn("worktree `8-34a`", text[33652])
-        self.assertIn("worktree `8-34a`", text[33932])
+        self.assertIn("worktree `8-934a`", text[33652])
+        self.assertIn("worktree `8-934a`", text[33932])
         self.assertIn("run_full_suite.py", text[33652])
         self.assertIn("the main checkout", text[35344])
         self.assertEqual(ko.exit_code(verdicts, alive=[]), 1)
@@ -194,7 +194,7 @@ class WatchSelectionTests(unittest.TestCase):
         slot_zero = row(20, f"{MAIN}/src", cmdline=r"docker.exe compose up --build --watch", name="docker.exe")
         flag_form_in_wt = row(21, f"{WT}/src", cmdline=r"docker.exe compose up --build --watch",
                               name="docker.exe")
-        other = row(22, f"{ROOT}/16-16/src", cmdline=WATCH_CMD, name="docker.exe")
+        other = row(22, f"{ROOT}/16-916/src", cmdline=WATCH_CMD, name="docker.exe")
         not_docker = row(23, f"{WT}/src", cmdline="python.exe watch compose", name="python.exe")
         rows = [listed_parent, slot_zero, flag_form_in_wt, other, not_docker, self.PARENT, self.CHILD]
         self.assertEqual([r["pid"] for r in ko.select_watch(rows, WT)], [10, 11])
@@ -208,9 +208,9 @@ class WatchSelectionTests(unittest.TestCase):
         self.assertEqual([r["pid"] for r in ko.select_watch([form], WT)], [31])
 
     def test_cleanup_of_16_1_never_reaches_16_16(self):
-        other = row(22, f"{ROOT}/16-16/src", cmdline=WATCH_CMD, name="docker.exe")
-        mine = row(23, f"{ROOT}/16-1/src", cmdline=WATCH_CMD, name="docker.exe")
-        self.assertEqual([r["pid"] for r in ko.select_watch([other, mine], f"{ROOT}/16-1")], [23])
+        other = row(22, f"{ROOT}/16-916/src", cmdline=WATCH_CMD, name="docker.exe")
+        mine = row(23, f"{ROOT}/16-91/src", cmdline=WATCH_CMD, name="docker.exe")
+        self.assertEqual([r["pid"] for r in ko.select_watch([other, mine], f"{ROOT}/16-91")], [23])
 
     def test_a_watch_with_an_unreadable_cwd_is_not_selected(self):
         self.assertEqual(ko.select_watch([row(24, None, cmdline=WATCH_CMD, name="docker.exe")], WT), [])
@@ -580,7 +580,7 @@ class UnreadableProcessTests(unittest.TestCase):
         self.psutil(gate, wininit, services, svchost, wmi, shell, target)
         self.assertEqual([r["pid"] for r in ko._ancestors(target)], [20, 16, 12, 8, 4, 2])
         entries, _ = ko.scan_pids([100], False, owner(), frozenset())
-        self.assertEqual(entries[0][0].reasons, ["under story-8-34a's run_full_suite.py pid 2"])
+        self.assertEqual(entries[0][0].reasons, ["under story-8-934a's run_full_suite.py pid 2"])
         wininit.parent_proc = None
         entries, _ = ko.scan_pids([100], False, owner(), frozenset())
         self.assertEqual(entries[0][0].reasons, [])
@@ -646,7 +646,7 @@ class UnreadableProcessTests(unittest.TestCase):
         self.psutil(gate, hidden, target)
         entries, _ = ko.scan_pids([100], False, owner(), frozenset())
         self.assertEqual(entries[0][0].reasons,
-                         ["ancestor 50 unreadable", "under story-8-34a's run_full_suite.py pid 40"])
+                         ["ancestor 50 unreadable", "under story-8-934a's run_full_suite.py pid 40"])
 
     def test_an_ancestor_that_exited_during_the_walk_ends_it_without_a_refusal(self):
         vanished = FakeProc(60, gone=True)
@@ -684,7 +684,7 @@ class UnreadableProcessTests(unittest.TestCase):
         readable = FakeProc(11, parent=root)
         hidden = FakeProc(12, parent=root, denied={"cmdline"})
         vanished = FakeProc(13, parent=root, gone=True)
-        elsewhere = FakeProc(20, cwd=f"{ROOT}/16-16/src", cmdline=WATCH_CMD, name="docker.exe")
+        elsewhere = FakeProc(20, cwd=f"{ROOT}/16-916/src", cmdline=WATCH_CMD, name="docker.exe")
         self.psutil(root, readable, hidden, vanished, elsewhere)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):

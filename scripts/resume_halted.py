@@ -11,7 +11,7 @@ Usage (the main checkout, on `config: git.base_branch`):
 Pass the ruling in single quotes and write each single quote inside it as `'\\''`: the shell
 runs a backtick or a `$(...)` inside double quotes.
 
-`<story-id>` is any form of the id that names one sprint-status key (`16-18`, `16.18`, a unique
+`<story-id>` is any form of the id that names one sprint-status key (`16-918`, `16.918`, a unique
 key prefix, the full key). The story's entries are the failure-log entries whose heading id is
 the same story (dotted and dashed forms alike); the latest is the last in file order.
 

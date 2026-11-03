@@ -15,16 +15,16 @@ CONFLICTS file.
 Usage
 -----
     # files <branch> and the base branch (config: git.base_branch) both touched since they forked
-    uv run --no-project .workflow/scripts/branch_overlap.py story/7-45
+    uv run --no-project .workflow/scripts/branch_overlap.py story/7-945
 
     # against another base, in a worktree
-    uv run --no-project .workflow/scripts/branch_overlap.py story/7-45 --base main --repo <worktree>
+    uv run --no-project .workflow/scripts/branch_overlap.py story/7-945 --base main --repo <worktree>
 
     # also intersect with the repo's UNCOMMITTED files
-    uv run --no-project .workflow/scripts/branch_overlap.py story/7-45 --dirty
+    uv run --no-project .workflow/scripts/branch_overlap.py story/7-945 --dirty
 
     # for scripting: exit 1 when there is any overlap
-    uv run --no-project .workflow/scripts/branch_overlap.py story/7-45 --exit-code
+    uv run --no-project .workflow/scripts/branch_overlap.py story/7-945 --exit-code
 
 When to use
 -----------
@@ -125,7 +125,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Files a branch and its base both touched since they forked.",
     )
-    ap.add_argument("branch", help="the story branch, e.g. story/7-45")
+    ap.add_argument("branch", help="the story branch, e.g. story/7-945")
     ap.add_argument("--base", default=None, help="base branch (default: config git.base_branch)")
     ap.add_argument("--repo", default=".", help="repo or worktree to run in (default: cwd)")
     ap.add_argument(

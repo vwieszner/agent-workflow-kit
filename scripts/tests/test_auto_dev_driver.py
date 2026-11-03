@@ -175,10 +175,10 @@ class ForegroundRunTests(unittest.TestCase):
         self.assertEqual(line["cost_usd"], 0.25)
 
     def test_advanced_without_a_new_fact_stops_with_exit_1(self):
-        self.fake("9-9", "advanced")
+        self.fake("9-99", "advanced")
         code, log, _ = self.run_driver()
         self.assertEqual(code, 1, log)
-        self.assertTrue("audit of 9-9" in log or "no new fact" in log, log)
+        self.assertTrue("audit of 9-99" in log or "no new fact" in log, log)
 
 
 if __name__ == "__main__":

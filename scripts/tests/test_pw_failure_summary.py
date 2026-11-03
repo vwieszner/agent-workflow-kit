@@ -33,7 +33,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parent.parent / "pw_failure_summary.py"
 
 ANSI_ERROR = ("Error: \x1b[2mexpect(\x1b[22m\x1b[31mlocator\x1b[39m\x1b[2m).\x1b[22mtoBeVisible\x1b[2m()"
-              "\x1b[22m failed\n\nLocator:  getByTestId('dnd5e-stat-card')\nExpected: visible\n")
+              "\x1b[22m failed\n\nLocator:  getByTestId('summary-card')\nExpected: visible\n")
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
@@ -88,7 +88,7 @@ def library_steps() -> list:
          "params": {"url": "http://localhost:4173/projects/111/dashboard"}},
         {"type": "after", "callId": "call@10", "endTime": 11.0},
         {"type": "before", "callId": "call@11", "startTime": 12.0, "class": "Frame", "method": "expect",
-         "params": {"selector": "internal:testid=[data-testid=\"dnd5e-stat-card\"s]"}},
+         "params": {"selector": "internal:testid=[data-testid=\"summary-card\"s]"}},
         {"type": "after", "callId": "call@11", "endTime": 17.0, "error": {"name": "Expect", "message": "Expect failed"}},
     ]
 
@@ -105,7 +105,7 @@ def failing_members() -> dict[str, list]:
             step("expect@5", 'Expect "toBeVisible"', method="expect"),
             done("expect@5", error=ANSI_ERROR),
             {"type": "error", "message": ANSI_ERROR,
-             "stack": [{"file": "/app/tests/pages/PlayerViewPage.js", "line": 43, "column": 38},
+             "stack": [{"file": "/srv/web/tests/pages/DashboardPage.js", "line": 43, "column": 38},
                        {"file": "/app/tests/items.spec.js", "line": 60, "column": 22}]},
             step("hook@6", "After Hooks", method="hook"), done("hook@6"),
         ],
@@ -141,9 +141,9 @@ class PwFailureSummaryTests(unittest.TestCase):
             "== items-Item-Stats-chromium",
             "   !! 1 trace line(s) did not parse: this summary is incomplete",
             "   error: Error: expect(locator).toBeVisible() failed",
-            "   error: Locator:  getByTestId('dnd5e-stat-card')",
+            "   error: Locator:  getByTestId('summary-card')",
             "   error: Expected: visible",
-            "   at /app/tests/pages/PlayerViewPage.js:43",
+            "   at /srv/web/tests/pages/DashboardPage.js:43",
             '   action: POST "/api/token/"',
             '   action: Navigate to "/projects/111/dashboard"',
             '   FAILED action: Expect "toBeVisible"',
@@ -164,7 +164,7 @@ class PwFailureSummaryTests(unittest.TestCase):
         self.assertIn('   FAILED action: Expect "toBeVisible"', lines[first:second])
         self.assertNotIn("Frame.goto", "\n".join(lines[first:second]))
         self.assertIn("   action: Frame.goto http://localhost:4173/projects/111/dashboard", lines[second:])
-        self.assertIn('   FAILED action: Frame.expect internal:testid=[data-testid="dnd5e-stat-card"s]', lines[second:])
+        self.assertIn('   FAILED action: Frame.expect internal:testid=[data-testid="summary-card"s]', lines[second:])
 
     def test_failed_step_is_the_leaf_not_its_enclosing_step(self):
         members = {"test.trace": [
@@ -185,8 +185,8 @@ class PwFailureSummaryTests(unittest.TestCase):
         members = {
             "test.trace": [
                 step("pw:api@1", 'Navigate to "/projects/21"'), done("pw:api@1"),
-                step("pw:api@2", 'POST "/api/game-sessions/21/roll/cast/"'), done("pw:api@2"),
-                {"type": "error", "message": "Error: Failed to cast a DM roll: 500 <!DOCTYPE html>",
+                step("pw:api@2", 'POST "/api/orders/21/submit/"'), done("pw:api@2"),
+                {"type": "error", "message": "Error: Failed to submit an order: 500 <!DOCTYPE html>",
                  "stack": [{"file": "/app/tests/helpers.js", "line": 660}]},
                 step("hook@3", "After Hooks", method="hook"),
                 step("pw:api@4", 'DELETE "/api/projects/21/"', parent="hook@3"), done("pw:api@4"),
@@ -195,19 +195,19 @@ class PwFailureSummaryTests(unittest.TestCase):
                 step("fixture@6", 'Fixture "browser"', method="fixture", parent="hook@5"),
                 done("fixture@6"), done("hook@5"),
             ],
-            "1-trace.network": [resource("POST", "http://backend:8001/api/game-sessions/21/roll/cast/", 500)],
+            "1-trace.network": [resource("POST", "http://api:9000/api/orders/21/submit/", 500)],
         }
-        write_trace(self.root / "dm-roll-cast-chromium", members)
+        write_trace(self.root / "order-submit-chromium", members)
         proc = run(str(self.root))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.splitlines(), [
-            "== dm-roll-cast-chromium",
-            "   error: Error: Failed to cast a DM roll: 500 <!DOCTYPE html>",
+            "== order-submit-chromium",
+            "   error: Error: Failed to submit an order: 500 <!DOCTYPE html>",
             "   at /app/tests/helpers.js:660",
             "   no failed step recorded: the error was thrown outside a Playwright action",
             '   action: Navigate to "/projects/21"',
-            '   action: POST "/api/game-sessions/21/roll/cast/"',
-            "   http 500 POST http://backend:8001/api/game-sessions/21/roll/cast/",
+            '   action: POST "/api/orders/21/submit/"',
+            "   http 500 POST http://api:9000/api/orders/21/submit/",
         ])
 
     def test_unreadable_archives_are_reported_and_skipped(self):

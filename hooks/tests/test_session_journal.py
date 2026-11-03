@@ -101,13 +101,13 @@ class JournalTests(HookTestCase):
         t.write_text(json.dumps({"type": "assistant", "message": {"content": [
             {"type": "tool_use", "id": "a", "name": "Agent",
              "input": {"subagent_type": "story-impl", "description": "impl",
-                       "prompt": "story_id: 7-21b.\nGo."}},
+                       "prompt": "story_id: 7-921b.\nGo."}},
             {"type": "tool_use", "id": "b", "name": "Workflow",
-             "input": {"name": "review", "args": {"story_id": "7-21b"}}}]}}) + "\n", encoding="utf-8")
+             "input": {"name": "review", "args": {"story_id": "7-921b"}}}]}}) + "\n", encoding="utf-8")
         self.run_hook(JOURNAL, {"hook_event_name": "Stop", "session_id": "s6", "transcript_path": str(t)})
         (entry,) = self.entries("s6.jsonl")
         spawned = [f for f in entry["facts"] if f["kind"] == "agent_spawned"][0]
-        self.assertEqual("7-21b", spawned["story_id"])
+        self.assertEqual("7-921b", spawned["story_id"])
         run = [f for f in entry["facts"] if f["kind"] == "workflow_run"][0]
         self.assertEqual("review", run["workflow"])
 

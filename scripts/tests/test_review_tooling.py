@@ -146,7 +146,7 @@ class DiffChunks(unittest.TestCase):
                 "+it.skip('a skipped title', () => {});",
                 "+test.fixme('a fixme title', async () => {});",
                 "+it.each([403, 409])('a %i from end_session never navigates', async (status) => {});",
-                "+it.each([['lobby'], ['characters']])('marks %s as the only current row', (item) => {});",
+                "+it.each([['inbox'], ['archive']])('marks %s as the only current row', (item) => {});",
                 "+it.each([",
                 "+  [1, 'a'],",
                 "+])('a title after a multi-line table %i', (n) => {});"]
@@ -160,9 +160,9 @@ class DiffChunks(unittest.TestCase):
                 "+  'a title on the next line',",
                 "+  async () => {},",
                 "+);",
-                "+it('shows the error line when the viewer\\'s own character cannot be loaded', async () => {});"]
+                "+it('shows the error line when the viewer\\'s own profile cannot be loaded', async () => {});"]
         self.assertEqual(self.titles({UNIT_TEST: body}), [
-            "a title on the next line", "shows the error line when the viewer's own character cannot be loaded"])
+            "a title on the next line", "shows the error line when the viewer's own profile cannot be loaded"])
 
     def test_only_added_lines_open_a_title_and_a_title_added_under_an_unchanged_opener_counts(self):
         body = ["@@ -10,6 +10,7 @@",
@@ -367,7 +367,7 @@ class SpecAcIds(unittest.TestCase):
             "**AC7.3b made non-vacuous.** a bold note",
             "**AC8, AC9 verified** in prose",
             "### ACs in prose", "### AC compliance",
-            "Story 8.34b AC1 sets the width.", ""])
+            "Story 8.934b AC1 sets the width.", ""])
         self.assertEqual(spec_ac_ids(spec), [])
 
     def test_the_acceptance_criteria_section_decides_when_it_holds_an_id(self):
@@ -489,7 +489,7 @@ class RenderHelpers(unittest.TestCase):
         self.assertEqual("outside", self.R.delta_side("src/a.py:40", delta))
         self.assertEqual("inside", self.R.delta_side("src/gone.py:1", delta))
         self.assertEqual("inside", self.R.delta_side("src/a.py:40; src/a.py:11", delta))
-        self.assertEqual("inside", self.R.delta_side("src/a.py:40,11-12", delta), "a bare range keeps its file")
+        self.assertEqual("inside", self.R.delta_side("src/a.py:40,11-912", delta), "a bare range keeps its file")
         self.assertEqual("inside", self.R.delta_side("N/A", delta), "an unplaceable location keeps the loop going")
         self.assertEqual("n/a", self.R.delta_side("src/a.py:40", dict(delta, kind="branch")))
 

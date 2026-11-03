@@ -6,12 +6,12 @@
 
 Usage
 -----
-    uv run --no-project .workflow/scripts/story_refs.py 8-34a                       # specs scope
-    uv run --no-project .workflow/scripts/story_refs.py 7-39 8-36a --in specs --in epics --in tracker
-    uv run --no-project .workflow/scripts/story_refs.py 16-18 16-20 8-37 --among     # hits inside another listed story's own files
-    uv run --no-project .workflow/scripts/story_refs.py 10-10 --files                # one line per file: hits, kind, path
+    uv run --no-project .workflow/scripts/story_refs.py 8-934a                       # specs scope
+    uv run --no-project .workflow/scripts/story_refs.py 7-939 8-936a --in specs --in epics --in tracker
+    uv run --no-project .workflow/scripts/story_refs.py 16-918 16-920 8-937 --among     # hits inside another listed story's own files
+    uv run --no-project .workflow/scripts/story_refs.py 10-910 --files                # one line per file: hits, kind, path
     uv run --no-project .workflow/scripts/story_refs.py ab-17 --json
-    uv run --no-project .workflow/scripts/story_refs.py 8-34a --root <worktree>      # a worktree's docs
+    uv run --no-project .workflow/scripts/story_refs.py 8-934a --root <worktree>      # a worktree's docs
 
 When to use
 -----------
@@ -22,18 +22,18 @@ When to use
 Keys
 ----
     Each KEY resolves against the main checkout's sprint-status rows (`sprint_status.ROW_RE`): an exact key,
-    or the one key that starts with KEY + "-" where the next character is not a digit (16-1 never resolves to
-    16-10). An all-numeric id resolves in either spelling (7-5-6 finds 7.5.6-...). A full key is searched by
-    its short id (8-34a-some-slug -> 8-34a); a named key with no numeric id is searched as given. An unknown
+    or the one key that starts with KEY + "-" where the next character is not a digit (16-91 never resolves to
+    16-910). An all-numeric id resolves in either spelling (7-5-6 finds 7.5.6-...). A full key is searched by
+    its short id (8-934a-some-slug -> 8-934a); a named key with no numeric id is searched as given. An unknown
     or ambiguous KEY prints its error line, the other keys still run, exit 2.
 
 Match rule (per line, case-insensitive)
 ---------------------------------------
-    Forms: the short id dashed, plus its dotted spelling when all-numeric (8-34a + 8.34a; ab-17 dashed only).
+    Forms: the short id dashed, plus its dotted spelling when all-numeric (8-934a + 8.934a; ab-17 dashed only).
     A form matches when
-      - it is not preceded by a letter, digit or "_", by "<digit>-" / "<digit>." (dates, versions, 18-34a),
+      - it is not preceded by a letter, digit or "_", by "<digit>-" / "<digit>." (dates, versions, 18-934a),
         or by a path's line-range colon (file.py:10-11). A colon after a word stays a match (dep:16.1);
-      - it is not followed by a letter, digit or "_", or by "-<digit>" / ".<digit>" (7-5 never matches 7-5-6).
+      - it is not followed by a letter, digit or "_", or by "-<digit>" / ".<digit>" (7-95 never matches 7-95-6).
     A trailing "-<letter>" is allowed, so a slug or full key matches its id. A two-segment all-numeric dotted
     form (8.1) also reads as a decimal; a line whose every match is that form with no "Story"/"Stories"/"dep"
     word before it is kept and marked "#" (number_like in --json). Nothing is dropped for looking numeric.
@@ -93,7 +93,7 @@ NUMERIC_ID = re.compile(r"\d+(?:[.-]\d+)+[a-z]?", re.IGNORECASE)
 # with an optional letter suffix (1-4a-login-form-... -> 1-4a, ab-17-... -> ab-17).
 SHORT_RE = re.compile(r"^((?:[a-z]+\d*-)?\d+[a-z]?(?:-\d+[a-z]?)*)(?:-|$)")
 STORY_WORD = re.compile(r"(?:stor(?:y|ies)|deps?)\W{0,3}$", re.IGNORECASE)
-# Left edge of a match: not inside a longer token, a date, a version or a longer id (18-34a, 2026-10-10),
+# Left edge of a match: not inside a longer token, a date, a version or a longer id (18-934a, 2026-10-10),
 # and not a path's line range (views.py:10-11, `:647-648`). A word's colon stays a match: dep:16.1 is a dep.
 LEFT = (r"(?<![A-Za-z0-9_])(?<!\d[.-])(?<![^A-Za-z]:)"
         + "".join(rf"(?<!\.[A-Za-z]{{{n}}}:)" for n in range(1, 6)))
@@ -114,7 +114,7 @@ class Story:
             self.forms.append(self.sid.replace("-", "."))
         alt = "|".join(re.escape(f) for f in sorted(self.forms, key=len, reverse=True))
         self.pattern = re.compile(LEFT + r"(?:" + alt + r")(?![A-Za-z0-9_])(?![.-]\d)", re.IGNORECASE)
-        # 8.1, 16.1, 7.20 also read as decimals ("8.1 s", "8.1:1", "-8.1 %"); 8.34a and 7.5.6 do not.
+        # 8.1, 16.1, 7.20 also read as decimals ("8.1 s", "8.1:1", "-8.1 %"); 8.934a and 7.5.6 do not.
         self.decimal_form = self.forms[1] if len(self.forms) > 1 and re.fullmatch(r"\d+\.\d+", self.forms[1]) else None
 
     def number_like(self, line: str) -> bool:

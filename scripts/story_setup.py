@@ -170,7 +170,7 @@ def launch_detached(argv: list[str], cwd: Path, env: dict) -> str:
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)  # pyright: ignore[reportAttributeAccessIssue] — keep progress ordered around child output
     ap = argparse.ArgumentParser(description="parallel-dev-wave Phase 1 story setup")
-    ap.add_argument("story_id", help="story id -- dotted (7.5.8) or dashed (21-3)")
+    ap.add_argument("story_id", help="story id -- dotted (7.5.8) or dashed (21-93)")
     ap.add_argument("--repo-root", default=None, help="default: wfconfig repo root")
     ap.add_argument("--reserved-slot", type=int, default=None,
                     help="the slot the caller itself reserved for this story with reserve_slot.py "

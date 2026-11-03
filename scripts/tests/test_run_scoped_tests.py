@@ -150,7 +150,7 @@ class ScopedCliTests(unittest.TestCase):
 
     def test_story_id_runs_in_the_registry_worktree(self):
         root = self._setup()
-        wt = root / "wt" / "7-2"
+        wt = root / "wt" / "7-92"
         wt.mkdir(parents=True)
         reg = root / "docs" / "implementation-artifacts" / "slot-registry.md"
         reg.parent.mkdir(parents=True)
@@ -158,15 +158,15 @@ class ScopedCliTests(unittest.TestCase):
             "| Slot | Status | Story ID | Branch | Worktree | Since |\n"
             "|------|--------|----------|--------|----------|-------|\n"
             "| 1 | free | — | — | — | — |\n"
-            f"| 2 | in_use | 7-2 | story/7-2 | {wt} | 2026-01-01 |\n", encoding="utf-8")
-        ctx, err = run_scoped_tests.resolve_target("7-2", None)
+            f"| 2 | in_use | 7-92 | story/7-92 | {wt} | 2026-01-01 |\n", encoding="utf-8")
+        ctx, err = run_scoped_tests.resolve_target("7-92", None)
         self.assertIsNone(err)
         self.assertEqual(ctx["slot"], 2)
         self.assertEqual(Path(ctx["worktree"]), wt.resolve())
-        self.assertEqual(ctx["stack"], "story-7-2")
-        code, out = self._main("--story-id", "7-2", "green")
+        self.assertEqual(ctx["stack"], "story-7-92")
+        code, out = self._main("--story-id", "7-92", "green")
         self.assertEqual(code, 0, out)
-        code, out = self._main("--story-id", "9-9", "green")
+        code, out = self._main("--story-id", "9-99", "green")
         self.assertEqual(code, 2, out)
 
 
