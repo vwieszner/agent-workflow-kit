@@ -1,0 +1,86 @@
+
+Running 19 tests using 3 workers
+····×······F·······×F
+
+  1) [chromium] › tests/dashboard.spec.js:85:3 › Dashboard › renders its own shell with no Navbar, reads the tab counts from the server, and routes a detail card 
+
+    Error: expect(locator).toHaveCSS(expected) failed
+
+    Locator: getByTestId('global-sidebar-items')
+    Expected string: "2px"
+    Received string: "1px"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toHaveCSS" with timeout 5000ms
+      - waiting for getByTestId('global-sidebar-items')
+        9 × locator resolved to <a class="css-3xibni" data-discover="true" href="/my-items" data-testid="global-sidebar-items">…</a>
+          - unexpected value "1px"
+
+
+      55 | async function expectWhiteRing(row) {
+      56 |   await expect(row).toHaveCSS('outline-style', 'solid');
+    > 57 |   await expect(row).toHaveCSS('outline-width', '2px');
+         |                     ^
+      58 |   await expect(row).toHaveCSS('outline-color', 'rgb(255, 255, 255)');
+      59 |   await expect(row).toHaveCSS('outline-offset', '2px');
+      60 |   await expect(row).toHaveCSS('box-shadow', 'none');
+        at expectWhiteRing (/app/tests/dashboard.spec.js:57:21)
+        at /app/tests/dashboard.spec.js:127:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/dashboard-Dashboard-Hu-163dc-rver-and-routes-a-Play-card-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/dashboard-Dashboard-Hu-163dc-rver-and-routes-a-Play-card-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/dashboard-Dashboard-Hu-163dc-rver-and-routes-a-Play-card-chromium/error-context.md
+
+  2) [chromium] › tests/search.spec.js:36:3 › Search Feature › the side rail renders the shared Global Sidebar and draws the white focus ring on keyboard focus only 
+
+    Error: expect(locator).toHaveCSS(expected) failed
+
+    Locator: getByTestId('global-sidebar-logout')
+    Expected string: "2px"
+    Received string: "1px"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toHaveCSS" with timeout 5000ms
+      - waiting for getByTestId('global-sidebar-logout')
+        9 × locator resolved to <button type="button" class="css-3xibni" data-testid="global-sidebar-logout">…</button>
+          - unexpected value "1px"
+
+
+      60 |     await expect(logOut).toBeFocused();
+      61 |     await expect(logOut).toHaveCSS('outline-style', 'solid');
+    > 62 |     await expect(logOut).toHaveCSS('outline-width', '2px');
+         |                          ^
+      63 |     await expect(logOut).toHaveCSS('outline-color', 'rgb(255, 255, 255)');
+      64 |     await expect(logOut).toHaveCSS('outline-offset', '2px');
+      65 |     await expect(logOut).toHaveCSS('box-shadow', 'none');
+        at /app/tests/search.spec.js:62:26
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/search-Search-Fe-5f619-ring-on-keyboard-focus-only-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/search-Search-Fe-5f619-ring-on-keyboard-focus-only-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/search-Search-Fe-5f619-ring-on-keyboard-focus-only-chromium/error-context.md
+
+
+  2 failed
+    [chromium] › tests/dashboard.spec.js:85:3 › Dashboard › renders its own shell with no Navbar, reads the tab counts from the server, and routes a detail card 
+    [chromium] › tests/search.spec.js:36:3 › Search Feature › the side rail renders the shared Global Sidebar and draws the white focus ring on keyboard focus only 
+  17 passed (1.8m)
+
+[WebServer] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

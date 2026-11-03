@@ -9,7 +9,8 @@ description: MANDATORY whenever an E2E test fails or E2E-related infrastructure 
 |---|---|
 | Source edit | Confirm live sync picked it up (`live-sync.md`); restart the service if it does not hot-reload |
 | Dependency manifest / lockfile | Rebuild images (`config: env.dependency_rebuild_cmd`) and bring the stack up again |
-| Environment file / settings module | Recreate the affected services (`down` + `up`, with every port env var) |
+| Environment file (env vars baked at container creation) | Recreate the affected services (`down` + `up`, with every port env var) |
+| Settings/config source file inside a synced mount | Live sync carries it (sync+restart); confirm it reached the container |
 
 ## 2. Reproduce first
 Before fixing any E2E failure, reproduce it in the live environment with the browser tools (at

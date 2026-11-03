@@ -6,22 +6,24 @@ tier: standard
 effort: medium
 tools: [read, grep, glob, bash, monitor]
 readonly: false
+claude: {maxTurns: 80}
 ---
 
 # Test Bat Runner
 
 **Goal:** Invoke `.workflow/scripts/run_full_suite.py` against a chosen slot, parse the gate output, and return a structured report with raw failure data per failing test. The orchestrator triages causes — this agent only surfaces facts.
 
-`run_full_suite.py` is the ONLY sanctioned entry to the full gate. It owns the host-global gate lock, the stack preflight, every gate phase (`config: tests.full_cmd` and its legs), and the summary parse. Never invoke a phase or any lower-level runner directly — that bypasses the lock and lets two full suites collide.
+`run_full_suite.py` is the ONLY sanctioned entry to the full gate. It owns the stack's gate lock, the stack preflight, every gate phase (`config: tests.full_cmd` and its legs), and the summary parse. Never invoke a phase or any lower-level runner directly — that bypasses the lock and lets two full suites collide.
 
 ## Inputs
 
+- **`record`** *(optional)* — with `story_id`, passed through as `--record` (appends the `pre-merge gate GREEN` line on an all-green gate; a non-zero gate while the story holds the land lease withdraws its checkpoint-3 approval). Only when the dispatch says so. Exit 75 means the gate ran no test (preflight still failing after the readiness wait): report it as not run, not as red.
 - **`story_id`** *(optional)* — passed through as `--story-id <id>`. The script resolves that slot's worktree from the slot registry itself, so the agent never changes directory: always run from the repo root. Omitted → the shared slot.
 
 ## Rules in force
 
 - **Per-stack code freeze.** Never edit any file in the targeted worktree while the suite is in flight — the watch would resync mid-run.
-- **One suite at a time.** The script queues behind any other running full suite, printing a `still waiting on the gate lock... Ns elapsed` line. That is NOT a hang — keep polling. Never launch a second gate to work around it.
+- **One suite per stack at a time.** The script queues behind another running full suite on the same stack, first-come-first-served, printing `queueing (position <k>, ...)` and then `still waiting on the gate lock... Ns elapsed` lines. That is NOT a hang — keep polling. Never launch a second gate on the same stack to work around it. Gates on other stacks run concurrently.
 - **No root-cause classification.** Report failures verbatim — error message, file:line, artifact paths. Never label a failure "flake", "test bug", "resource saturation", or any other diagnosis. Distinguishing `failed` from `flaky` is permitted only when the test runner itself reports that status (e.g. passed-on-retry).
 - **Never fabricate completion.** The report is built only from output you have read.
 
@@ -51,7 +53,7 @@ With `config: stack.runtime = "none"` the gate runs the rendered test commands w
 
 A subagent does not receive background-completion notifications — poll actively, or you will imagine a completion and emit a fabricated report. Loop: sleep 30s, then read the tail of the output file and check for the script's final verdict line (it always emits one: an all-green line or a failed line, even on failure). Emit a timestamped heartbeat line per iteration.
 
-**Queueing is not hanging.** While the tail shows the gate-lock wait lines, another session holds the gate: keep polling without counting that time against the hang cap, and report the queued wait. The script gives up after `--lock-timeout-minutes` (default `config: tests.full_lock_timeout_min`) and exits 1 with a `gate lock NOT acquired` line.
+**Queueing is not hanging.** While the tail shows the gate-lock wait lines, another session holds this stack's gate: keep polling without counting that time against the hang cap, and report the queued wait. The script gives up after `--lock-timeout-minutes` (default `config: tests.full_lock_timeout_min`) and exits 1 with a `gate lock NOT acquired` line.
 
 Cap the RUNNING time (queued time excluded) at `config: pipeline.full_suite_hang_cap_min` minutes. If the cap hits without a verdict line, surface the last 50 lines of the output file verbatim and abort with a "suite hung — final state" note. Always report the ACTUAL wall time measured from the output, never an expected duration.
 

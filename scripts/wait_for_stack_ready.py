@@ -23,6 +23,12 @@ line says liveness was not confirmed).
 
 `config: stack.runtime = "none"` → prints a SKIPPED line and exits 0.
 
+Budget: `--timeout-sec` counts from the waiter's start. While the helper reports `retrying` (a
+failed seed on a fresh stack, wiped and retried once) its `retry_started_at` is a second anchor:
+the deadline is the later of (waiter start + timeout) and (retry start + timeout), re-evaluated
+every poll. A retry that starts after the waiter gets a full timeout from its own start; one that
+started before never shortens the waiter's. The TIMEOUT line names the anchor that ran out.
+
 Exit codes:
   0 -- stack reached `up` AND its services are running now (or stack runtime is none)
   1 -- stack reported `failed` (log tail printed), or no status file
@@ -48,6 +54,24 @@ import _stack  # noqa: E402
 
 def ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+def retry_started(status: dict) -> datetime | None:
+    """When the helper began the fresh-stack retry pass: a `retrying` record's `retry_started_at`."""
+    if status.get("status") != "retrying":
+        return None
+    try:
+        return datetime.fromisoformat(str(status["retry_started_at"]))
+    except (KeyError, ValueError):
+        return None
+
+
+def spent_anchor(waited: float, since_retry: float | None, timeout_sec: int) -> str | None:
+    """The anchor whose timeout has run out, or None while the deadline has not passed. The anchor
+    that began last decides; a retry that began before the waiter never shortens its budget."""
+    if since_retry is not None and since_retry < waited:
+        return "the retry start" if since_retry > timeout_sec else None
+    return "the waiter start" if waited > timeout_sec else None
 
 
 def live_missing(stack: str, repo_root: Path) -> set[str] | None:
@@ -101,7 +125,8 @@ def main() -> int:
         print("  (story_setup.py was not run, or the stack name is wrong)")
         return 1
 
-    deadline = time.monotonic() + args.timeout_sec
+    started = time.monotonic()
+    retry_at: datetime | None = None
     last_status = ""
     expected = _stack.expected_services()
 
@@ -148,12 +173,16 @@ def main() -> int:
                 print(f"[{ts()}] {args.stack}: FAILED -- {status.get('error')}")
                 tail(log_file)
                 return 1
+            retry_at = retry_started(status) or retry_at
             if status.get("status") != last_status:
                 print(f"[{ts()}] {args.stack}: {status.get('status')}")
                 last_status = status.get("status") or ""
 
-        if time.monotonic() > deadline:
-            print(f"[{ts()}] {args.stack}: TIMEOUT after {args.timeout_sec}s (last status={last_status})")
+        since_retry = ((datetime.now().astimezone() - retry_at).total_seconds()
+                       if retry_at is not None else None)
+        anchor = spent_anchor(time.monotonic() - started, since_retry, args.timeout_sec)
+        if anchor:
+            print(f"[{ts()}] {args.stack}: TIMEOUT {args.timeout_sec}s after {anchor} (last status={last_status})")
             tail(log_file)
             return 2
 

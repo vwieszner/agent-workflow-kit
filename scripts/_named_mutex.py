@@ -21,7 +21,7 @@ character outside [A-Za-z0-9._-] becomes `_` (so `Global\\SlotRegistry` and
 `SlotRegistry` are the same lock).
 
 Used by: reserve_slot.py, release_slot.py, slot_registry.py (name `slot-registry`),
-log_failure.py (its own name). Importable because the scripts' directory is on
+log_failure.py and resume_halted.py (the failure-log name). Importable because the scripts' directory is on
 sys.path when they run as `uv run --no-project .workflow/scripts/<script>.py`.
 """
 from __future__ import annotations

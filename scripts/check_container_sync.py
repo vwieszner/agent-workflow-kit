@@ -38,7 +38,16 @@ Usage:
   # detected drift -> repair it into every drifted service
   uv run --no-project .workflow/scripts/check_container_sync.py -p story-7-42 --fix src/app/x.py
 
-Exit codes: 0 = all in sync (or SKIPPED), 1 = drift remains, 2 = usage/environment error.
+  # deleted / moved-away files are gone from their containers (--fix: rm the leftovers)
+  uv run --no-project .workflow/scripts/check_container_sync.py -p story-7-42 --absent --wait 60 src/app/old.py
+
+`--absent` is the same check for a DELETED file: every path must be gone from the host and from
+each service that serves it (compose watch syncs edits but does not always propagate deletions).
+An exec that cannot answer (container down, timeout) is a FAIL, never "absent" and never a
+leftover: --fix never `rm`s in it.
+
+Exit codes: 0 = all in sync / all gone (or SKIPPED), 1 = drift or leftovers remain,
+2 = usage/environment error.
 """
 from __future__ import annotations
 
@@ -136,6 +145,128 @@ def _container_md5(project: str, service: str, cpath: str) -> str | None:
     return parts[0] if parts else None
 
 
+_PRESENT, _ABSENT = "present", "absent"
+_PROBE = 'if [ -e "$1" ]; then echo present; else echo absent; fi'
+
+
+def _container_presence(project: str, service: str, cpath: str) -> str | None:
+    """`present` / `absent` for a path in a service, or None when the exec did not answer
+    (`compose exec` on a stopped service exits 1, the same code `test -e` uses)."""
+    try:
+        out = _stack.run(_stack.compose_argv(project, "exec", "-T", service, "sh", "-c", _PROBE, "sh", cpath),
+                         timeout=60, env=_stack.env_for_stack(project))
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    word = (out.stdout or "").strip()
+    return word if out.returncode == 0 and word in (_PRESENT, _ABSENT) else None
+
+
+def _remove_in(project: str, service: str, root: str, crel: str) -> bool:
+    try:
+        res = _stack.run(_stack.compose_argv(project, "exec", "-T", service, "rm", "-f", "--",
+                                             _exec_path(root, crel)),
+                         timeout=60, env=_stack.env_for_stack(project))
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        print(f"        rm did not answer -> {service}")
+        return False
+    if res.returncode != 0:
+        print(f"        rm failed -> {service}: {(res.stderr or '').strip()[:200]}")
+        return False
+    return True
+
+
+def survey_absent(project: str, files: list[str], override: tuple[str, ...] | None) -> list[dict]:
+    """Each path's presence on the host and, when the host no longer has it, in its services."""
+    rows = []
+    for rel in files:
+        crel, routed, root = _route(rel)
+        services = override if override else routed
+        row = {"rel": rel, "host_present": Path(rel).exists(), "crel": crel, "root": root,
+               "services": services, "containers": {}}
+        if crel is not None and services and not row["host_present"]:
+            for svc in services:
+                row["containers"][svc] = _container_presence(project, svc, _exec_path(root, crel))
+        rows.append(row)
+    return rows
+
+
+def report_absent(rows: list[dict]):
+    """Print the --absent table. Returns (leftover (rel, service) pairs, unanswered pairs,
+    paths still on the host, files checked, files skipped)."""
+    leftover, unanswered, on_host = [], [], []
+    checked = skipped = 0
+    for row in rows:
+        rel = row["rel"]
+        if row["crel"] is None:
+            print(f"[SKIP] {rel} - outside every sync mount, not checked")
+            skipped += 1
+            continue
+        if row["host_present"]:
+            print(f"[FAIL] {rel:<62} host     still exists on the host")
+            on_host.append(rel)
+            continue
+        checked += 1
+        for svc in row["services"]:
+            c = row["containers"].get(svc)
+            if c is None:
+                print(f"[FAIL] {rel:<62} {svc:<8} container did not answer")
+                unanswered.append((rel, svc))
+            elif c == _ABSENT:
+                print(f"[GONE] {rel:<62} {svc:<8}")
+            else:
+                print(f"[LEFT] {rel:<62} {svc:<8} still in container")
+                leftover.append((rel, svc))
+    return leftover, unanswered, on_host, checked, skipped
+
+
+def main_absent(project: str, files: list[str], wait: int, fix: bool,
+                override: tuple[str, ...] | None) -> int:
+    def say_unanswered(unanswered):
+        svcs = sorted({svc for _rel, svc in unanswered})
+        print(f"\n{len(unanswered)} path(s) not judged: {', '.join(svcs)} did not answer the probe. "
+              f"Check the service is up and re-run; --fix cannot help.")
+
+    deadline = time.monotonic() + wait
+    while True:
+        leftover, unanswered, on_host, checked, skipped = report_absent(survey_absent(project, files, override))
+        if on_host:
+            print(f"\n{len(on_host)} path(s) still exist on the host - delete them first.")
+            return 1
+        if not leftover and not unanswered:
+            tail = f" ({skipped} skipped)" if skipped else ""
+            print(f"[{_stamp()}] {checked} path(s) gone from host and containers{tail}")
+            return 0 if checked else 2
+        if wait and time.monotonic() < deadline:
+            print(f"[{_stamp()}] still waiting on compose watch - {len(leftover)} left, "
+                  f"{len(unanswered)} unanswered, {int(deadline - time.monotonic())}s left...")
+            time.sleep(5)
+            continue
+        break
+    if unanswered:
+        say_unanswered(unanswered)
+    if not leftover:
+        return 1
+    if not fix:
+        print(f"\n{len(leftover)} leftover(s) in containers. Re-run with --fix to `rm -f` them in each service.")
+        return 1
+    print(f"\n[{_stamp()}] removing {len(leftover)} leftover(s)...")
+    ok = True
+    for rel, svc in leftover:  # only a service that answered `present` is touched
+        crel, _, root = _route(rel)
+        if crel is not None and _remove_in(project, svc, root, crel):
+            print(f"        removed {rel} from {svc}")
+        else:
+            ok = False
+    remaining, unanswered, _h, _c, _s = report_absent(survey_absent(project, files, override))
+    if unanswered:
+        say_unanswered(unanswered)
+    if remaining or unanswered or not ok:
+        print(f"\n{len(remaining)} leftover(s) REMAIN after removal.")
+        return 1
+    print("\nAll leftovers removed.")
+    return 0
+
+
 def _copy_in(project: str, service: str, host: Path, root: str, crel: str) -> bool:
     res = _stack.run(_stack.compose_argv(project, "cp", str(host), _cp_dest(service, root, crel)),
                      timeout=120, env=_stack.env_for_stack(project))
@@ -177,7 +308,7 @@ def report(rows: list[dict]) -> tuple[list[tuple[str, str]], int, int]:
             skipped += 1
             continue
         if h is None:
-            print(f"[SKIP] {rel} - no such file on the host, not checked")
+            print(f"[SKIP] {rel} - no such file on the host, not checked (deleted? use --absent)")
             skipped += 1
             continue
         checked += 1
@@ -251,7 +382,10 @@ def main() -> int:
     ap.add_argument("--wait", type=int, default=0, metavar="SECONDS",
                     help="poll until in sync or timeout, instead of checking once")
     ap.add_argument("--fix", action="store_true",
-                    help="repair drift with `compose cp` into every drifted service")
+                    help="repair drift with `compose cp` into every drifted service "
+                         "(with --absent: `rm -f` the leftovers in each service)")
+    ap.add_argument("--absent", action="store_true",
+                    help="every path must be gone from the host and from each service that serves it")
     ap.add_argument("--allow-foreign-cwd", action="store_true",
                     help="skip the cwd/project guard (deliberately checking another tree)")
     args = ap.parse_args()
@@ -278,6 +412,9 @@ def main() -> int:
         override = tuple(s.strip() for s in args.services.split(",") if s.strip())
         if not override:
             return _die("--services was given with no service names")
+
+    if args.absent:
+        return main_absent(project, args.files, args.wait, args.fix, override)
 
     deadline = time.monotonic() + args.wait
     while True:

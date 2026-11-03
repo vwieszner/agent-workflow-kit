@@ -1,0 +1,3 @@
+time="2026-09-25T10:00:00+02:00" level=warning msg="The \"API_KEY\" variable is not set. Defaulting to a blank string."
+cannot take exclusive lock for project "story-1-2": process with PID 37980 is still running
+docker compose watch exited with code 1

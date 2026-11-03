@@ -21,10 +21,13 @@ It checks: every service in `config: stack.services` running; every `config: sta
 
 **Exit 0** → proceed. **Exit 1** → surface the failing lines and HALT; never run tests against a broken stack.
 
+A `watch` FAIL (no compose-watch process anchored in the worktree) is restarted, not diagnosed: `bring_up_story_stack.py --slot <N> --project-name <stack> --worktree <worktree> --mode watch` in the background (it carries every port var), then `uv run --no-project .workflow/scripts/wait_for_watch_ready.py <that task's output file>` (exit 0 ready, 1 a failure line — a stale lock comes with its remedy — 2 timeout), then re-run the preflight. Files written before the restart need a touch to sync.
+
 The sync check samples a few recently modified files. When the branch's own changed files must be live, verify them explicitly:
 
 ```
 uv run --no-project .workflow/scripts/check_container_sync.py -p <stack> <paths>
+uv run --no-project .workflow/scripts/check_container_sync.py -p <stack> --absent <deleted paths>
 ```
 
 ## Diagnosis when it fails

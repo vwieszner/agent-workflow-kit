@@ -37,9 +37,30 @@ import wfconfig  # noqa: E402
 SETTINGS_REL = ".claude/settings.json"
 PLUGIN_REL = ".opencode/plugins/workflow-hooks.ts"
 PLUGIN_HOOKS_REL = ".workflow/hooks"
-SCRIPT_TOKEN = re.compile(r"[\w./\\-]*[\w-]\.(?:py|ps1|sh|bat)\b")
+SCRIPT_TOKEN = re.compile(r"(?:[A-Za-z]:)?[\w./\\-]*[\w-]\.(?:py|ps1|sh|bat)\b")
 PLUGIN_SCRIPT = re.compile(r"""["'`]([\w./-]+\.py)["'`]""")
 PROJECT_DIR_VARS = ("${CLAUDE_PROJECT_DIR}", "$CLAUDE_PROJECT_DIR")
+
+
+def checkout_roots(root: Path) -> tuple[Path, ...]:
+    """`root`, plus the main checkout's root when `root` is a linked worktree: hooks may name
+    scripts by an absolute main-checkout path, and every worktree tracks the same relative paths."""
+    common = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-common-dir"],
+                            capture_output=True, text=True, check=False).stdout.strip()
+    main_root = (root / common).resolve().parent if common else root
+    return tuple(dict.fromkeys((root.resolve(), main_root)))
+
+
+def repo_relative(token: str, roots: tuple[Path, ...]) -> str:
+    """A hook's script token as `git ls-files` prints it: `/` separators, and a path under any of
+    `roots` made repo-relative."""
+    path = token.replace("\\", "/").removeprefix("./")
+    for root in roots:
+        try:
+            return Path(path).relative_to(root).as_posix()
+        except ValueError:
+            continue
+    return path.lstrip("/")
 
 
 def settings_refs(repo: Path, failures: list[str]) -> list[str] | None:
@@ -53,6 +74,7 @@ def settings_refs(repo: Path, failures: list[str]) -> list[str] | None:
         failures.append(f"[hooks] cannot parse {SETTINGS_REL}: {e}")
         return []
     refs: list[str] = []
+    roots = checkout_roots(repo)
     for entries in (settings.get("hooks") or {}).values():
         for entry in entries or []:
             for hook in entry.get("hooks", []) or []:
@@ -62,7 +84,7 @@ def settings_refs(repo: Path, failures: list[str]) -> list[str] | None:
                 for var in PROJECT_DIR_VARS:
                     cmd = cmd.replace(var, "")
                 for token in SCRIPT_TOKEN.findall(cmd):
-                    rel = token.replace("\\", "/").lstrip("/").removeprefix("./")
+                    rel = repo_relative(token, roots)
                     if "/" in rel or (repo / rel).exists():
                         refs.append(rel)
     return refs

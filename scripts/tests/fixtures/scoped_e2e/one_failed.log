@@ -1,0 +1,30 @@
+
+Running 1 test using 1 worker
+×F
+
+  1) [chromium] › tests/repro-r1-10.spec.js:6:1 › settle() gives up on a dialog whose box never stabilises 
+
+    Error: expect(received).not.toBe(expected) // Object.is equality
+
+    Expected: not "still pending after 10s (no frame cap)"
+
+      24 |         new Promise((resolve) => setTimeout(() => resolve('still pending after 10s (no frame cap)'), 10000)),
+      25 |     ]);
+    > 26 |     expect(outcome).not.toBe('still pending after 10s (no frame cap)');
+         |                         ^
+      27 | });
+      28 |
+        at /app/tests/repro-r1-10.spec.js:26:25
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/repro-r1-10-settle-gives-u-ca879--whose-box-never-stabilises-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests/repro-r1-10.spec.js:6:1 › settle() gives up on a dialog whose box never stabilises 
+
+[WebServer] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

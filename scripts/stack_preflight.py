@@ -145,7 +145,8 @@ def check_watch(worktree: Path) -> bool:
                                 f"cwd={worktree}")
         return True
     record("FAIL", "watch", f"no compose-watch process anchored in {worktree} — edits will NOT sync; "
-                            "restart via bring_up_story_stack.py --mode watch (carries ALL port vars)")
+                            "restart via bring_up_story_stack.py --mode watch (carries ALL port vars) in the "
+                            "background, then wait_for_watch_ready.py <the watch task's output file>")
     return False
 
 

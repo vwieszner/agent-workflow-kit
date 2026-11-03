@@ -58,10 +58,10 @@ class SuiteLockTests(unittest.TestCase):
         run_full_suite.LOCK_DIR = self._real
         self._tmp.cleanup()
 
-    def _start_holder(self, hold_seconds: float) -> subprocess.Popen:
+    def _start_holder(self, hold_seconds: float, name: str | None = None) -> subprocess.Popen:
         proc = subprocess.Popen(
             [sys.executable, "-c", _HOLDER, str(te.SCRIPTS), str(self.lock_dir),
-             run_full_suite.LOCK_NAME, str(self.ready_path), str(hold_seconds)])
+             name or run_full_suite.LOCK_NAME, str(self.ready_path), str(hold_seconds)])
         # Registered after _restore so it runs BEFORE it (cleanups are LIFO).
         self.addCleanup(_reap, proc)
         deadline = time.monotonic() + 30
@@ -93,7 +93,8 @@ class SuiteLockTests(unittest.TestCase):
         self.assertIn("gate lock acquired", text, f"the run never reported taking the lock:\n{text}")
 
     def test_a_lock_it_cannot_take_aborts_the_run(self) -> None:
-        self._start_holder(hold_seconds=30)
+        # main() takes the shared stack's lock (default stack name: project.name → "project").
+        self._start_holder(hold_seconds=30, name=run_full_suite.lock_name("project"))
         ran: list[int] = []
         real = run_full_suite._run_gate
         self.addCleanup(setattr, run_full_suite, "_run_gate", real)
@@ -109,6 +110,55 @@ class SuiteLockTests(unittest.TestCase):
             first.release()
             second = run_full_suite._acquire_suite_lock(budget_minutes=0.01, heartbeat_seconds=0.1)
         second.release()
+
+    def test_gates_on_different_stacks_do_not_share_a_lock(self) -> None:
+        self._start_holder(hold_seconds=30, name=run_full_suite.lock_name("story-1-1"))
+        with redirect_stdout(io.StringIO()):
+            other = run_full_suite._acquire_suite_lock(budget_minutes=0.01, heartbeat_seconds=0.1,
+                                                       stack="story-2-2")
+        other.release()
+        with self.assertRaises(run_full_suite.LockTimeout):
+            with redirect_stdout(io.StringIO()):
+                run_full_suite._acquire_suite_lock(budget_minutes=1 / 60, heartbeat_seconds=0.2,
+                                                   stack="story-1-1")
+
+    def test_host_scope_uses_one_lock_for_every_stack(self) -> None:
+        cfg = self.root / ".workflow" / "config.toml"
+        cfg.write_text(cfg.read_text() + 'gate_lock_scope = "host"\n', encoding="utf-8")
+        te.clear_caches()
+        self.assertEqual(run_full_suite.lock_name("story-1-1"), run_full_suite.LOCK_NAME)
+
+    def test_a_live_waiter_ahead_in_the_line_is_not_overtaken(self) -> None:
+        import json
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        line = run_full_suite._line_path("s")
+        line.parent.mkdir(parents=True, exist_ok=True)
+        line.write_text(json.dumps({"line": [{"token": "other", "joined": now, "seen": now}]}))
+        with self.assertRaises(run_full_suite.LockTimeout):
+            with redirect_stdout(io.StringIO()):
+                run_full_suite._acquire_suite_lock(budget_minutes=0.5 / 60, heartbeat_seconds=0.2, stack="s")
+        # our own entry left the line; the live waiter ahead stays at its head
+        self.assertEqual([e["token"] for e in json.loads(line.read_text())["line"]], ["other"])
+
+    def test_a_dead_entry_ahead_is_dropped(self) -> None:
+        import json
+        line = run_full_suite._line_path("s")
+        line.parent.mkdir(parents=True, exist_ok=True)
+        stale = "2000-01-01T00:00:00Z"
+        line.write_text(json.dumps({"line": [{"token": "dead", "joined": stale, "seen": stale}]}))
+        with redirect_stdout(io.StringIO()):
+            lock = run_full_suite._acquire_suite_lock(budget_minutes=0.1, heartbeat_seconds=0.2, stack="s")
+        lock.release()
+
+    def test_a_malformed_line_file_fails_closed(self) -> None:
+        line = run_full_suite._line_path("s")
+        line.parent.mkdir(parents=True, exist_ok=True)
+        line.write_text("{not json")
+        with self.assertRaises(run_full_suite.LockTimeout) as cm:
+            with redirect_stdout(io.StringIO()):
+                run_full_suite._acquire_suite_lock(budget_minutes=0.05, heartbeat_seconds=0.2, stack="s")
+        self.assertIn("not valid JSON", str(cm.exception.cause))
 
 
 if __name__ == "__main__":

@@ -113,34 +113,145 @@ def is_container_segment(seg: str) -> bool:
     return bool(DOCKER_EXEC_COMPOSE.search(seg) or DOCKER_EXEC_SIMPLE.search(seg))
 
 
-def unquoted_residue(cmd: str) -> str:
+def unquoted_residue(cmd: str, track_substitutions: bool = False) -> str:
     """Blank out single- and double-quoted spans (length-preserving) so only
-    shell-UNQUOTED text remains."""
+    shell-UNQUOTED text remains.
+
+    `track_substitutions` follows a `$(` opened inside "...": its body is a fresh quoting
+    context (a nested "..." is quoted, its unquoted text stays visible) that ends at the `)`
+    balancing it. Pass it only on text whose heredoc bodies are already blanked: a body
+    inside `"$(cat <<'EOF' ...)"` has no quoting, and an apostrophe in it would flip the
+    scan's state.
+    """
     out: list[str] = []
-    state: str | None = None
+    stack: list[str] = []   # open contexts: "'", '"', "$("; empty = top level
+    depth: list[int] = []   # unbalanced "(" inside each open "$(" context
     i, n = 0, len(cmd)
     while i < n:
         c = cmd[i]
-        if state is None:
-            if c in ("'", '"'):
-                state = c
-                out.append(" ")
-            else:
-                out.append(c)
-        elif state == "'":
+        state = stack[-1] if stack else None
+        if state == "'":
             if c == "'":
-                state = None
+                stack.pop()
             out.append(" ")
-        else:
+        elif state == '"':
             if c == "\\" and i + 1 < n and cmd[i + 1] in ('"', "\\", "$", "`"):
                 out.append("  ")
                 i += 2
                 continue
+            if track_substitutions and cmd.startswith("$(", i):
+                stack.append("$(")
+                depth.append(0)
+                out.append("  ")
+                i += 2
+                continue
             if c == '"':
-                state = None
+                stack.pop()
             out.append(" ")
+        else:  # top level, or the body of a "$(" opened inside double quotes
+            if c in ("'", '"'):
+                stack.append(c)
+                out.append(" ")
+            elif state == "$(" and c == ")" and depth[-1] == 0:
+                stack.pop()
+                depth.pop()
+                out.append(" ")
+            else:
+                if state == "$(" and c == "(":
+                    depth[-1] += 1
+                elif state == "$(" and c == ")":
+                    depth[-1] -= 1
+                out.append(c)
         i += 1
     return "".join(out)
+
+
+_HEREDOC_START = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+_SHELLS = {"bash", "sh", "zsh", "dash"}
+_OPENER_SEGMENT_SPLIT = re.compile(r"\|\||&&|[;|&]")
+_ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_PIPE_TO_SHELL = re.compile(r"(?<!\|)\|(?!\|)\s*(?:\S*/)?(?:ba|z|da)?sh\b")
+
+
+def _feeds_host_shell(before: str, after: str) -> bool:
+    """True when a host shell runs a `<<` body: the opener's segment starts with a shell
+    (after `VAR=x` prefixes), or the opener line pipes into one (`cat <<'EOF' | bash`)."""
+    if _PIPE_TO_SHELL.search(after):
+        return True
+    words = _OPENER_SEGMENT_SPLIT.split(before)[-1].split()
+    while words and _ENV_ASSIGN.match(words[0]):
+        words.pop(0)
+    return bool(words) and words[0].rsplit("/", 1)[-1] in _SHELLS
+
+
+def blank_heredoc_bodies(cmd: str, keep_host_shell_bodies: bool = False) -> str:
+    """Blank heredoc BODIES (length-preserving) so content written THROUGH the shell
+    (`cat > f <<'EOF'`, `python - <<'EOF'`, `git commit -F - <<EOF`) is not read as shell
+    syntax. `keep_host_shell_bodies` keeps a body a host shell runs (`bash <<EOF`,
+    `VAR=1 sh <<EOF`, `cat <<'EOF' | bash`): its lines are commands. Run it BEFORE
+    `unquoted_residue`, which erases the quotes around a `<<'EOF'` delimiter."""
+    lines = cmd.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        m = _HEREDOC_START.search(line)
+        if not m:
+            continue
+        delim = m.group(2)
+        keep = keep_host_shell_bodies and _feeds_host_shell(line[:m.start()], line[m.end():])
+        while i < len(lines) and lines[i].strip() != delim:
+            out.append(lines[i] if keep else " " * len(lines[i]))
+            i += 1
+        if i < len(lines):
+            out.append(lines[i])
+            i += 1
+    return "\n".join(out)
+
+
+_HERE_STRING_OPEN = re.compile(r"@(['\"])\s*$")
+_EVALUATOR = r"(?:\S*[\\/])?(?:iex|invoke-expression|powershell|pwsh|bash|sh|cmd)(?:\.exe)?(?![\w-])"
+_STARTS_WITH_EVALUATOR = re.compile(r"^\s*(?:&\s*)?" + _EVALUATOR, re.IGNORECASE)
+_PIPE_TO_EVALUATOR = re.compile(r"(?<!\|)\|(?!\|)\s*(?:&\s*)?" + _EVALUATOR, re.IGNORECASE)
+_PS_OPENER_SPLIT = re.compile(r"\|\||&&|[;|]")
+
+
+def blank_here_string_bodies(cmd: str) -> str:
+    """PowerShell: blank here-string BODIES (`@'...'@`, `@"..."@`; closer at column 0),
+    length-preserving, so content piped or assigned through PowerShell is not read as a
+    command. Kept: a body a shell or evaluator runs (the opener's segment starts with one,
+    or the closer line pipes into one), an `@"` body holding `$(` (its subexpressions run),
+    and text after an opener with no closer."""
+    lines = cmd.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        m = _HERE_STRING_OPEN.search(line)
+        if not m:
+            continue
+        closer = m.group(1) + "@"
+        end = i
+        while end < len(lines) and not lines[end].startswith(closer):
+            end += 1
+        body = lines[i:end]
+        keep = (end == len(lines)
+                or _STARTS_WITH_EVALUATOR.match(_PS_OPENER_SPLIT.split(line[:m.start()])[-1])
+                or (end < len(lines) and _PIPE_TO_EVALUATOR.search(lines[end][len(closer):]))
+                or (closer == '"@' and any("$(" in b for b in body)))
+        out.extend(body if keep else [" " * len(b) for b in body])
+        i = end
+    return "\n".join(out)
+
+
+# `git commit` (incl. `git -C <path> commit`), never `git commit-tree`.
+GIT_COMMIT = re.compile(
+    r'\bgit(?:\s+-[Cc]\s+(?:"[^"]*"|\'[^\']*\'|[^\s"\']\S*)|\s+--[^\s=]+=\S+'
+    r'|\s+--(?:git-dir|work-tree)\s+\S+)*\s+commit(?![\w-])')
 
 
 # ------------------------------------------------------------------ shared command rules
