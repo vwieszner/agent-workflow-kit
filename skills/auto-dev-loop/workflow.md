@@ -5,43 +5,72 @@ story, run the full story lifecycle, merge, clean up, move on. Repeat until no s
 remains.
 
 The `parallel-dev-wave` skill is the controlled equivalent with three human gates. **This skill
-removes those gates.** Multiple review runs plus meta-evaluation are the mitigation.
+removes those gates.** Multiple review passes, verification and meta-evaluation are the mitigation.
 
-All scripts below are invoked as `uv run --no-project .workflow/scripts/<name>.py ...` from the
-repo root (`python3 .workflow/scripts/<name>.py ...` works too).
+All scripts below are invoked as `uv run --no-project .workflow/scripts/<name>.py ...` from the main
+checkout (`python3 .workflow/scripts/<name>.py ...` works too). Steps that name a script the project
+has not installed (`land_lease.py`, `merge_train.py`, `branch_overlap.py`) are skipped and say so.
 
 ---
 
 ## Pre-authorized operations (authorized in advance by the owner — DO NOT ASK)
 
-Every destructive operation invoked by this skill is **pre-authorized**. Do NOT ask for
-confirmation on any of these — asking IS a bug in this mode.
+Every operation below is **pre-authorized**. Do NOT ask for confirmation on any of these — asking
+IS a bug in this mode. Anything this list does not name is not pre-authorized.
 
-**Pre-authorized:**
-
-- `bring_up_story_stack.py --mode down` / `<config: stack.compose_cmd> -p <config: slots.stack_prefix>* down -v` (wipes the isolated stack's volumes)
-- Every compose operation (up / down / restart / exec / build / logs / watch / ps) against a `<config: slots.stack_prefix>*` project
-- `git worktree add` / `git worktree remove --force` of a path under `config: git.worktrees_root`
-- `git add -A` + WIP commits on the story branch, inside the story worktree (halt-and-release)
-- `git branch -D <config: git.branch_prefix><id>` — ONLY for stories closed via `land-story`; halted stories keep their branch (halt-and-release)
-- `git merge <config: git.merge_style>` of the story branch into `config: git.base_branch`
-- Recursive delete (`rm -rf`; Windows `Remove-Item -Recurse -Force`) of any path under `config: git.worktrees_root`, under any `config: loop.cleanup_paths` entry, or under the session's scratch/temp directory
-- Running `reserve_slot.py`, `release_slot.py`, `bring_up_story_stack.py`, `stack_preflight.py`, `cleanup_story_stack.py`, `log_failure.py`, `sprint_status.py`, `story_record.py`
-- Appending the auto-labelled `checkpoint-1 spec approved` and `checkpoint-3 merge approved` facts to the story record (Steps 5 and 11)
-- Invocations of `land-story`, `post-merge-smoke`, and the halt-and-release procedure
-- `findings-evaluator`'s patch/defer/dismiss classification for every finding (no owner triage gate in this mode). **Exception: a finding assessed as quality-bar-blocking is NOT auto-triageable** — it is patched, or halt-and-released for human triage (Step 9). Bar-severity assignment is the owner's call and is never pre-authorized.
-- Sprint-status flips between `backlog` ↔ `ready-for-dev` ↔ `in-progress` ↔ `review` ↔ `done`
+- `halt_release.py` (the halt-and-release procedure): the WIP commit in the story worktree, the
+  sprint-status flip to `blocked`, the failure-log entry, the lease release, the kill of the
+  worktree's orphan `compose watch`, `{compose} -p <stack> stop` (containers stopped; logs and data
+  volumes kept), the slot release, and its bookkeeping commit on `config: git.base_branch`.
+- `bring_up_story_stack.py --mode down` (wipes the isolated stack's volumes) of a story that is
+  **not** halted, and every other compose operation (up / restart / exec / build / logs / watch /
+  ps) against a `<config: slots.stack_prefix>*` project. A halted story's stack is never wiped. A
+  bare `{compose} ... down` is never run.
+- The worktree removal and branch delete inside `cleanup_story_stack.py`, run by `land-story` after
+  the merge. In an auto-dev-loop session the `auto_dev_keep` guard denies `git worktree remove`, a
+  `<config: git.branch_prefix>*` branch delete, a delete of a worktree root, a container volume
+  `rm`/`prune`, a `cleanup_story_stack.py` teardown of an unmerged worktree and a
+  `bring_up_story_stack.py --mode down` of a halted story; a deny there is a halt-and-release, never
+  a workaround.
+- The `git merge <config: git.merge_style>` of the story branch into `config: git.base_branch`, run
+  by `land-story`.
+- Recursive delete (`rm -rf`; Windows `Remove-Item -Recurse -Force`) of any path inside a story
+  worktree (never a worktree root), under any `config: loop.cleanup_paths` entry, or under the
+  session's scratch/temp directory.
+- Running `reserve_slot.py`, `release_slot.py`, `story_setup.py`, `wait_for_stack_ready.py`,
+  `stack_preflight.py`, `cleanup_story_stack.py`, `log_failure.py`, `sprint_status.py`,
+  `story_record.py`, `story_ledger.py`, `milestone_map_check.py`, and invoking `land-story`,
+  `post-merge-smoke` and `milestone-blockers` (with `AUTO_MODE`).
+- Appending the auto-labelled `checkpoint-1 spec approved (auto-dev-loop …)` and
+  `checkpoint-3 merge approved (auto-dev-loop …)` facts and the other record lines this file names.
+- `findings-evaluator`'s patch/defer/dismiss classification for every finding (no owner triage gate
+  in this mode). A finding assessed as quality-bar-blocking is never deferred or dismissed: it is
+  patched, or the story halts (Step 9). Bar-severity assignment is never pre-authorized.
+- Recommended phases and priorities (marked `(recommended)`) from `milestone-map-refresh` and
+  `story-spec`. A value the owner set is never changed.
+- The `milestone-blockers` `AUTO_MODE` refresh: the `milestone-map-refresh` agent's edits to the
+  dependency map, row notes and story history, committed as its own changes, and a
+  `log_failure.py --failure-step map-refresh` entry per question it returns.
+- Sprint-status flips between `backlog` ↔ `ready-for-dev` ↔ `in-progress` ↔ `review` ↔ `done`; any
+  status → `blocked` (halt-and-release); a hand-blocked row → `in-progress` (Step 3b).
+- When installed: `land_lease.py acquire` / `release` / `holds`, `merge_train.py`
+  (`wait`, `home`, `settle`), `branch_overlap.py`, the `story-rebase` dispatch onto
+  `config: git.base_branch` with `validate: stack` together with the conflict resolutions it makes
+  under the 11c.3 rules, and the pre-merge gate `run_full_suite.py --story-id <id> --record`.
+- The resume path's git operations in the story worktree: Step 3a′'s plain rebase and its
+  `git rebase --abort`; Step 7's repro clean-up; Step 10's fold of `wip:` and docs commits into the
+  impl (or close-out) commit (`git commit-tree`, `git reset --soft`).
 
 **NOT pre-authorized** (requires the owner before action):
 
-- Force push (`git push --force`, `--force-with-lease`)
-- Any push to a remote, including `config: git.main_branch` and `config: git.base_branch`
-- Fetching from or merging from a remote
-- `git commit --no-verify`
-- Anything on the tool's permission deny list (`.claude/settings.json` / `opencode.json`)
+- A wipe of the shared stack (`config: slots.shared_stack_name`) or any bare `{compose} ... down`.
+- Force push (`git push --force`, `--force-with-lease`); any push to a remote; fetching from or
+  merging from a remote.
+- `git commit --no-verify`.
+- Anything on the tool's permission deny list (`.claude/settings.json` / `opencode.json`).
 
-**On encountering an obstacle:** apply the halt-and-release procedure (below) and move to the next
-story. Do NOT pause to ask the owner.
+**On encountering an obstacle:** apply the halt-and-release procedure and move to the next story.
+Do NOT pause to ask the owner.
 
 ---
 
@@ -49,21 +78,20 @@ story. Do NOT pause to ask the owner.
 
 This skill operates under the owner's explicit override of two working rules:
 
-- **Code-review triage is NOT human-gated here.** The `findings-verifier` agent adversarially
-  verifies the union of three `layered-review` runs; the `findings-evaluator` agent makes the
-  patch/defer/dismiss call on the verified findings.
-- **Merge approval is NOT human-gated here.** If scoped tests are green, the loop merges via
+- **Code-review triage is NOT human-gated here.** The `findings-evaluator` agent makes the
+  patch/defer/dismiss call on the verified findings of each review round (one 3-pass `layered-review`
+  run per round, at most three rounds).
+- **Merge approval is NOT human-gated here.** If the tests are green, the loop merges via
   `land-story`.
 
 Every other rule (root cause before fix, no test-weakening, dispatch-prompt discipline, surgical
-changes) still applies unchanged.
+changes) applies unchanged. The phase-gate guard (`.workflow/hooks/guards/phase_dispatch.py`) stays
+on: the loop satisfies it with durable records that name the autonomous authority; it never writes
+a record claiming a human approved or triaged anything.
 
-The pipeline's phase-gate guard (`.workflow/hooks/guards/phase_dispatch.py`) stays on. The loop
-satisfies it with durable records that name the autonomous authority (Steps 5, 9b and 11) — it never
-disables the guard and never writes a record claiming a human approved something.
-
-Failure handling preserves the **git branch (with a WIP commit)** but releases the
-slot / worktree / stack via halt-and-release, so the loop keeps working on other stories.
+A halt never deletes work or evidence. Halt-and-release keeps the branch (with its WIP commit), the
+worktree and the stack (containers stopped; logs and data volumes kept) and releases only the slot.
+A halted story's worktree and stack data are deleted only by `land-story` or by the owner's discard.
 
 ---
 
@@ -71,39 +99,24 @@ slot / worktree / stack via halt-and-release, so the loop keeps working on other
 
 ```
 [main session — auto-dev-loop]
-  │
   └─ LOOP:
-       ├─ Step 1: pick the next story
-       │     ↳ milestone-blockers for config: loop.milestone  (or first ready-for-dev story)
-       │     ↳ drop stories already in a slot or in the failure log
-       │     ↳ none left → TERMINATE LOOP
-       │
-       ├─ Step 2: reserve_slot.py  (lock-protected, cross-terminal-safe)
-       │     ↳ already_reserved → back to Step 1
-       │     ↳ no_free_slot → wait 60s, retry 5×, then TERMINATE
-       │
-       ├─ Step 3: inline setup (orchestrator)
-       │     ↳ worktree add → stack up → compose watch (bg) → sanity check
-       │     ↳ graph index (optional) → spec discovery → sprint status in-progress
-       │
-       ├─ Step 4: auto-spec (only if spec_present: false)
-       │     ↳ story-spec agent (create-story + 3 elicitation rounds, non-interactive)
-       │
-       ├─ Step 5: stack_preflight.py (the gate) + auto checkpoint-1 record
-       │
-       ├─ Step 6: story-impl agent  (tests-first; max 5 batch-fix rounds; impl commit)
-       │
-       ├─ Step 7: layered-review × 3 on <merge-base>..HEAD
-       ├─ Step 8: findings_union (dedupe)
-       ├─ Step 8b: findings-verifier → CONFIRMED / REFUTED / UNVERIFIABLE + bar impact
-       ├─ Step 9: findings-evaluator → patch / defer / dismiss (+ bar-blocking list)
-       ├─ Step 9b: write the findings file with every decision + triage lists
-       │
-       ├─ Step 10: story-finalize agent  (patches → scoped tests, max 5 rounds → close-out commit)
-       │
-       ├─ Step 11: auto checkpoint-3 record → land-story
-       │     ↳ merge → post-merge-smoke → cleanup → sprint status done
-       │
+       ├─ Step 1: milestone-blockers AUTO_MODE (refreshes the map when due) → pick from STARTABLE
+       │     ↳ none → TERMINATE
+       ├─ Step 2: refuse a halted story; reserve_slot.py (lock-protected)
+       ├─ Step 3: story_setup.py --reserved-slot (worktree, seed files, spec lookup, graph index,
+       │          async stack bring-up); 3a′ resumed story: apply the halt's answers, rebase, re-up;
+       │          3b sprint status → in-progress
+       ├─ Step 4: spec (story-spec, auto mode) + open-question check + checkpoint-1 record
+       ├─ Step 5: wait_for_stack_ready.py → stack_preflight.py (the gate)
+       ├─ Step 6: story-impl (tests-first; max 5 batch-fix rounds; phase-2 GREEN record; impl commit)
+       ├─ Step 7: layered-review (mode auto, 3 passes) → findings file
+       ├─ Step 8: re-verify UNVERIFIED findings (findings-verifier)
+       ├─ Step 9: findings-evaluator → patch / defer / dismiss
+       ├─ Step 9b: ## Triage decisions in the findings file
+       ├─ Step 10: story-finalize (patches → scoped tests, max 5 rounds → close-out commit);
+       │           a close-out review round follows while the ledger says one is due
+       ├─ Step 11: phase-3 GREEN check → gate decision → story-propagate propose (parked) →
+       │           schema check → checkpoint-3 record → land window → land-story
        └─ Step 12: back to Step 1
 ```
 
@@ -115,74 +128,101 @@ Any failure in Steps 3–11 → halt-and-release → Step 1.
 
 None. The skill picks its own work.
 
-- `config: loop.milestone` — milestone whose `milestone-blockers` report feeds Step 1. Empty → the
-  first `ready-for-dev` story in sprint status.
-- `config: loop.max_stories` — cap on stories per invocation (`0` = unlimited). The environment
-  variable `AUTO_DEV_LOOP_MAX_STORIES`, when set, overrides it. Counts every story started
-  (landed or halted). When the cap is reached, finish the current story and stop with
-  `auto-dev-loop terminating — max_stories (<N>) reached`.
+- `config: loop.milestone` — the milestone `milestone-blockers` reports on. Empty → Step 1 takes
+  the first `ready-for-dev` story in sprint status (file order).
+- `config: loop.max_stories` — stories per invocation (`0` = unlimited); `AUTO_DEV_LOOP_MAX_STORIES`
+  overrides it. Counts every story started (landed or halted). Driver mode ignores both (the driver
+  has `--max-stories`).
+- Args `driver story=<id|none>`: driver mode, below.
+
+---
+
+## Driver mode — one phase per session
+
+`.workflow/scripts/auto_dev_driver.py` runs this skill as `/auto-dev-loop driver story=<id>` or
+`/auto-dev-loop driver story=none`, each time in a fresh headless session. In driver mode:
+
+1. **One phase per session.** Run the one phase this section selects, then end the session. Never
+   start the next phase, and never loop back to Step 1, in the same session; after a
+   halt-and-release, end the session.
+2. **`story=none`:** run Steps 1–4 for one new story. The phase ends at the Step 4b record line.
+3. **`story=<id>`:** continues only a story that holds a slot-registry row; a halted story holds
+   none (the resume command resumes it and Step 1 picks it). When the story's row reads `blocked`,
+   apply Step 2's halted check first; a halted story ends the session with `outcome=infra-stop`.
+   When the row reads `ready-for-dev`, or is hand-blocked, and the story holds a slot-registry row,
+   run Step 3b's flip with the slot from that row first. Then run
+   `story_ledger.py <id>` and select the first matching phase from its "Handoff state" block, the
+   `seed ACs due` / `review re-run due` / `review round due` lines after it, and the record file:
+
+   | Ledger | Phase | Ends at |
+   |---|---|---|
+   | `spec approved` not ok, the story holds a slot | Step 4 | the Step 4b record line |
+   | `spec approved` ok, `phase-2 tests` not ok | Steps 5–6 | the `phase-2 tests GREEN` record line |
+   | `phase-3 tests` ok and a `seed ACs due: AC…` line | halt-and-release, `failure_step="resume-seed-ac"` | the failure entry |
+   | `phase-2 tests` ok, `triage recorded` not ok and a `seed ACs due: AC…` line | Steps 5, then Step 6's seed-AC run | the `seed ACs implemented` record line |
+   | `phase-2 tests` ok, no `review round 1 recorded` line in the record | Step 7 | the `review round 1 recorded` line |
+   | a `review re-run due: round <m>` line | Steps 5, the Step 7 repro clean-up, then Step 7 (round `<m>`) | the `review round <m> recorded` line |
+   | a `review round <n> recorded` line, `triage recorded` not ok | Steps 8, 9, 9b | the `## Triage decisions` section |
+   | `triage recorded` ok, `phase-3 tests` not ok | Step 10 | the `phase-3 tests GREEN` record line |
+   | a `review round due: round <n>` line | Step 7 (a close-out round) | the `review round <n> recorded` line |
+   | `phase-3 tests` ok | Step 11 | `land-story` done, or `waiting` |
+
+   The `phase-3 tests` row counts only a GREEN line recorded after the latest
+   `review round <n> recorded` line. In Step 11, a sub-step whose record line already exists for the
+   branch's current HEAD is not run again; the 11c window always re-runs from `acquire`. A story with
+   no slot-registry row and no record: end with `outcome=infra-stop`.
+4. **Inputs come from disk, never from an earlier session:** `branch_name`, `worktree_path` and
+   `slot` from the story's slot-registry row; `stack_project_name` = `config: slots.stack_prefix` +
+   `branch_name`; `graph_project` from `.workflow/state/story-setup/<stack_project_name>.graph_project`;
+   `spec_path` and `findings_file` from the ledger's "Artifacts on disk"; Steps 8–9 read only the
+   `### Summary` and `### Findings for triage` parts of the findings file's latest `## Review round <n>`
+   section. The halt's answers: the latest `resumed halt` block of
+   `sprint_status.py history <story-key>` (Step 3a′). The first phase after a resume that runs the
+   halted step puts the block's ruling into that step's dispatch prompt (or the evaluator's input) and
+   appends `halt answers dispatched <entry id>` to the record once the dispatch has started; a later
+   phase skips the injection when that line exists.
+5. **Final line.** End the session's last message with exactly:
+   `AUTO-DEV-PHASE story=<id|none> outcome=<outcome> step=<last step run>`
+   `story=` names the story this session drove (from Step 2's reservation on, a halt included);
+   `none` only when no story was reserved. `<outcome>` is one of `advanced` (the phase's end record
+   exists), `landed` (Step 11c finished), `halted` (halt-and-release ran), `waiting` (11c.1 found the
+   lease held or stories ahead in the line; nothing torn down), `terminated` (Step 1 found no
+   story), `infra-stop` (an "Allowed stops" case). The driver checks the record, not this line: an
+   outcome other than `waiting` with no new record fact or failure-log entry stops the driver.
+6. Every other rule of this file applies unchanged.
 
 ---
 
 ## Halt-and-release procedure
 
-Used by every failure path in Steps 3–11. It preserves the branch (with its WIP commit) and
-releases the slot / worktree / stack. The owner resumes a failed story later by `git worktree add`
-from the preserved branch.
+Used by every failure path in Steps 3–11, including any dispatch that returns output marked partial
+(it hit its turn limit; never resume or retry it): `failure_step="<agent>-max-turns"`.
 
-**Steps (orchestrator, in the main session):**
-
-1. **Commit any uncommitted changes** as WIP, if there are any:
+1. **Questions.** Every question the failure leaves open goes into the failure summary, numbered.
+   A question about a design value, an undrawn state or other screen behaviour is the owner's like
+   any other.
+2. **Run the halt** (the main checkout's script, never a story branch's copy):
    ```bash
-   cd <worktree_path>
-   git add -A
-   git diff --cached --quiet || git commit -m "wip: [Story <story_id>] auto-loop halted in <failure_step>"
+   uv run --no-project .workflow/scripts/halt_release.py --story-id "<story_id>" --failure-step "<failure_step>" --failure-summary "<one-sentence summary, then the numbered questions>" --last-test-output "<last 30 lines or empty>"
    ```
-   Capture the commit hash if a commit was made (empty string if not).
+   It keeps the worktree, branch and stack and releases only the slot: draft marker (for a
+   `story-spec*` step), WIP commit, the sprint-status note's `HALTED <date> at <step>; worktree kept`
+   clause (status `blocked`), the failure entry, lease release, orphan watch kill, stack stop, slot
+   release, and one commit of the story's own bookkeeping on `config: git.base_branch`. Never run its
+   steps by hand.
+3. **Exit 0** (`"status": "halted"`): done. **Exit 1** (`"status": "partial"`): its JSON names each
+   failed step; stop the loop and report them (driver mode: `outcome=infra-stop`). **Exit 2**
+   (`"refused"`): a line break in `--story-id` or `--failure-step`; fix the arguments and run again.
+4. **Loop back to Step 1.** The failed story has a failure-log entry; `milestone-blockers` reports it
+   as halted, never as startable.
 
-2. **Log the failure** (lock-protected append):
-   ```bash
-   uv run --no-project .workflow/scripts/log_failure.py \
-       --story-id "<story_id>" \
-       --branch-name "<branch_name>" \
-       --failure-step "<failure_step>" \
-       --failure-summary "<one-sentence summary>" \
-       --wip-commit "<hash or empty>" \
-       --last-test-output "<last 30 lines or empty>"
-   ```
-   The entry lands in the failure log (`config: paths.auto_dev_failure_log`) and records: story id,
-   timestamp, failure step, the preserved branch, the WIP commit, the summary, the test-output
-   tail, and the resume command
-   (`git worktree add <config: git.worktrees_root>/<branch_name> <config: git.branch_prefix><branch_name>`).
-
-3. **Stop the stack and wipe its volumes** (skip, and say so, when `config: stack.runtime` is `none`):
-   ```bash
-   uv run --no-project .workflow/scripts/bring_up_story_stack.py \
-       --slot <slot> --project-name "<stack_project_name>" --worktree "<worktree_path>" --mode down
-   ```
-
-4. **Kill orphan compose-watch processes and remove the worktree, keeping the branch:**
-   ```bash
-   uv run --no-project .workflow/scripts/cleanup_story_stack.py "<story_id>" --skip-branch-delete
-   ```
-   `--skip-branch-delete` is the contract: the branch is preserved. If the script is unavailable,
-   fall back to `git worktree remove --force <worktree_path>`; if that fails because a
-   `compose watch` process still holds the directory, find the process whose working directory is
-   inside the worktree, stop it, and retry.
-
-5. **Release the slot** (lock-protected):
-   ```bash
-   uv run --no-project .workflow/scripts/release_slot.py --story-id "<story_id>"
-   ```
-   The script ONLY resets the slot row in `config: paths.slot_registry` to `free`. It does NOT touch
-   sprint status.
-
-6. **Do NOT flip sprint status on halt.** The story stays `in-progress`. The failure-log entry is
-   the explicit halt marker; a status outside `config: sprint_status.statuses` (e.g. `failed`) would
-   corrupt the status taxonomy. The owner triages later and decides whether to resume (stay
-   `in-progress`) or revert to `backlog` / `ready-for-dev`.
-
-7. **Loop back to Step 1.** Step 1's skip-set prevents re-picking the failed story.
+**Resume** (the owner, once the questions are answered):
+`uv run --no-project .workflow/scripts/resume_halted.py <story_id> --ruling '<the ruling>'`
+(`--no-ruling` when the halt asked nothing; the ruling goes in single quotes, each single quote
+inside it written `'\''`). It archives the entry with the ruling in the story history, removes it,
+sets the row `ready-for-dev` and commits; Step 1 can then pick the story, Step 3 reuses the worktree,
+Step 3a′ applies the ruling. **Discard** (the owner only):
+`uv run --no-project .workflow/scripts/cleanup_story_stack.py <branch_name>`.
 
 ---
 
@@ -190,368 +230,460 @@ from the preserved branch.
 
 ### Step 1 — Pick the next story
 
-**Skip-set** (applied to every candidate):
-- stories whose row in `config: paths.slot_registry` is `in_use` (read the registry directly);
-- stories with an entry in the failure log (`config: paths.auto_dev_failure_log`) — already failed once, the
-  owner's inspection is pending. If the log does not exist, the skip-set from it is empty.
-
-**Milestone configured** (`config: loop.milestone` non-empty): invoke the `milestone-blockers`
-skill for that milestone in the main session. Read its machine-readable tail: take `STARTABLE`,
-drop skip-set stories, and pick `RECOMMENDED` if it survives the skip-set, else the first remaining
-`STARTABLE` story. Never pick a story outside `STARTABLE` (group 0).
+**Milestone configured:** invoke the `milestone-blockers` skill with args `AUTO_MODE`. When one of its
+refresh reasons holds, it refreshes the map before writing the report. Read its machine-readable
+tail: take `STARTABLE`, drop stories whose slot-registry row is `in_use` (read the registry), and
+pick `RECOMMENDED` if it survives, else the first remaining `STARTABLE` story. Never pick outside
+`STARTABLE`.
 
 **No milestone configured:** run
-```bash
-uv run --no-project .workflow/scripts/sprint_status.py list --status ready-for-dev --exclude-epics --json
-```
-and pick the first row (file order) not in the skip-set.
+`uv run --no-project .workflow/scripts/sprint_status.py list --status ready-for-dev --exclude-epics --json`
+and pick the first row (file order) that holds no slot and has no failure-log entry.
 
-If no candidate remains: emit `auto-dev-loop terminating — no startable stories left` and stop.
+No candidate: emit `auto-dev-loop terminating — no startable stories left` and stop
+(driver mode: `outcome=terminated`).
 
-### Step 2 — Reserve the slot (lock-protected)
+### Step 2 — Refuse a halted story, then reserve the slot
+
+**Halted check** (before anything is reserved). Read the story's sprint-status row
+(`sprint_status.py get <id>`) and the failure log (`config: paths.auto_dev_failure_log`; headings
+`## <id> — <timestamp> — <step>`, dotted and dashed ids alike). A `blocked` row is **halted** when
+the failure log holds an entry for the story (the resume command has not run) or its note carries a
+`HALTED <date> at <step>` clause with no entry (a failed halt). A `blocked` row with neither is
+**hand-blocked** and goes on like any other. A halted story: stop and tell the owner (to run
+`resume_halted.py <story_id>` when the entry stands; a failed halt is theirs to rule on); in driver
+mode end with `outcome=infra-stop`. An unreadable sprint-status file or failure log is an "Allowed
+stops" case, never "not halted".
 
 ```bash
 uv run --no-project .workflow/scripts/reserve_slot.py --story-id "<story_id>"
 ```
 
-Parse the single-line JSON result:
-- `reserved` — take `slot`, `branch_name`, `worktree_path`, `stack_project_name`. The git branch is
-  `config: git.branch_prefix` + `branch_name`. Proceed to Step 3.
-- `already_reserved` — another terminal took it between Step 1 and Step 2. Back to Step 1.
-- `no_free_slot` — wait 60s with a timestamped heartbeat line, then re-run the script. If still
-  `no_free_slot` after 5 retries, emit
+Parse the single-line JSON:
+- `reserved` — take `slot`, `branch_name`, `worktree_path`, `stack_project_name`. Step 3.
+- `already_reserved` — another terminal took it. Back to Step 1.
+- `no_free_slot` — wait 60s with a timestamped heartbeat line, then re-run. After 5 retries emit
   `auto-dev-loop terminating — no free slot and 5min wait exhausted` and stop.
-- `error` — infrastructure issue, not a story failure: log it via `log_failure.py`
-  (`--failure-step reserve-slot`) and stop the loop, surfacing the message.
+- `error` — infrastructure issue: `log_failure.py --story-id <id> --branch-name none --failure-step reserve-slot …`
+  and stop the loop, surfacing the message.
 
-### Step 3 — Inline setup (orchestrator, in the main session)
+### Step 3 — Setup
 
-The orchestrator does setup directly (both this skill and `parallel-dev-wave`'s `story_setup.py`
-share `reserve_slot.py`; the rest runs inline so the orchestrator controls loop pacing). Use the
-values from Step 2. Ports derive from `slot` via `config: stack.ports` + `slot × config: stack.port_stride`;
-`bring_up_story_stack.py` passes all of them to every compose call.
-
-**3a — Create the worktree** off the base branch without switching the main checkout:
+**3a — Run the setup script** (the one `parallel-dev-wave` uses):
 
 ```bash
-git worktree add -b <config: git.branch_prefix><branch_name> <worktree_path> <config: git.base_branch>
+uv run --no-project .workflow/scripts/story_setup.py <story_id> --reserved-slot <slot>
 ```
 
-If the worktree already exists (resumed run), skip this and use the existing directory.
+It creates the worktree off `config: git.base_branch` (reusing an existing one), seeds
+`config: git.worktree_seed_files`, locates the spec, indexes the worktree into the code graph
+(when `config: graph.tool` is not `none`), launches the async stack bring-up and returns in seconds.
+Do not start `compose watch` yourself. Parse its `key: value` report for `worktree_path`,
+`stack_project_name`, `graph_project`, `spec_path` and `spec_present`; pass `graph_project` to every
+later dispatch that reads worktree code.
 
-Then seed each `config: git.worktree_seed_files` entry: copy it from the repo root into the same
-relative path in the worktree when the worktree has none. Never overwrite a worktree copy; a missing
-source file is a warning, not a failure.
+| Result | Action |
+|---|---|
+| exit 0, `graph_project` set (or graph disabled) | 3a′ |
+| exit 0, `graph_project: <indexing failed>` | halt-and-release, `failure_step="setup-graph-index"` |
+| exit 1 | halt-and-release, `failure_step="setup"`, quoting the failure line |
+| exit 3 (several spec candidates) | halt-and-release, `failure_step="setup-spec-ambiguity"`, naming them |
+| exit 4 (the slot is not the one Step 2 reserved) | another session owns the story: release nothing, touch nothing; back to Step 1 (driver: `outcome=infra-stop`) |
 
-**3b — Bring up the isolated stack** (foreground). Skip 3b–3d, and say so, when
-`config: stack.runtime` is `none`.
+**3a′ — Resumed story: apply the halt's answers, rebase onto the base branch, re-up.**
 
-```bash
-uv run --no-project .workflow/scripts/bring_up_story_stack.py \
-    --slot <slot> --project-name "<stack_project_name>" --worktree "<worktree_path>" --mode up
-```
+When `merge_train.py` is installed, first run `merge_train.py home <story_id>` (a worktree left on a
+train branch goes back to the story branch; exit 2: halt-and-release, `failure_step="resume-rebase"`).
 
-Verify exit code 0.
+Then apply the answers. Read the latest `resumed halt` block of
+`sprint_status.py history <story-key>` (the halted entries verbatim after a `ruling:` line). An answer
+that lives in the spec lands there now: an `[OPEN-Q <n>]` marker is replaced by its ruling. Any other
+answer goes into the dispatch prompt (or the evaluator's input) of the halted step, built by the
+session that runs it. Append `halt answers applied <entry id>` with `story_record.py append` and commit
+the spec edit and the record line on the story branch (`docs: [Story <story_id>] halt answers applied`).
+Skip the spec edit, the append and the commit when
+`git -C <worktree_path> log <branch> -S"halt answers applied <entry id>" --oneline` lists a commit.
+An answer that does not settle its question: halt-and-release with
+`failure_step="halt-answer-unclear"`, quoting the question and the answer. No `resumed halt` block:
+skip this paragraph.
 
-**3c — Start `compose watch` in the background** (only when `config: stack.watch` is true; Claude
-Code: `run_in_background: true`; OpenCode: a background shell):
+Then `git -C <worktree_path> merge-base --is-ancestor <config: git.base_branch> <branch>`: exit 0 →
+3b. Exit 1 → 1–5 below. Any other exit: halt-and-release, `failure_step="resume-rebase"`.
 
-```bash
-uv run --no-project .workflow/scripts/bring_up_story_stack.py \
-    --slot <slot> --project-name "<stack_project_name>" --worktree "<worktree_path>" --mode watch
-```
+1. **Wait** for the bring-up: `wait_for_stack_ready.py <stack_project_name>` (non-zero: halt-and-release,
+   `failure_step="stack-bring-up"`).
+2. **Docs-only branch** (every path of `git diff --name-only <base>...HEAD` is under `docs/` or
+   `config: paths.specs_dir`): `git -C <worktree_path> rebase <base>`; a conflict
+   (`git rebase --abort`) or refusal: halt-and-release, `failure_step="resume-rebase"`, naming the files.
+3. **Otherwise**: run `branch_overlap.py <branch> --base <base> --repo <worktree_path>` when installed,
+   then dispatch `story-rebase` with `target: <base>`, `validate: stack`,
+   `range_diff_path: <worktree_path>/.story-setup/range-diff-<story_id>-<n>.txt`, the OVERLAP and
+   CONFLICTS lists, 11c.3's per-file rules, `slot`, `stack_project_name`, `graph_project`, and every
+   commit of `<base>..HEAD` oldest first (`wip:` commits included). Resolved conflicts: append
+   `resume rebase onto <sha12>: <n> conflicted files resolved — <file>: <resolution>; …`. A
+   `story-rebase` HALT: halt-and-release, `failure_step="resume-rebase"`, with the file:line and options.
+4. **Re-up** after either rebase: `bring_up_story_stack.py --slot <slot> --project-name <stack> --worktree <worktree_path> --mode up`
+   (non-zero: halt-and-release, `failure_step="resume-re-up"`); append
+   `resume rebase onto <sha12> (<plain | story-rebase>); re-up ok`.
+5. **Re-index** the worktree in the code graph (when enabled); a failure: halt-and-release,
+   `failure_step="setup-graph-index"`.
 
-**3d — Sanity check:**
-
-```bash
-uv run --no-project .workflow/scripts/bring_up_story_stack.py \
-    --slot <slot> --project-name "<stack_project_name>" --worktree "<worktree_path>" --mode ps
-```
-
-Every service in `config: stack.services` must show `Up` / `running`. Any `Exited` or missing:
-halt-and-release with `failure_step="inline-setup-sanity-check"`. Go to Step 1.
-
-**3e — Graph index** (skip, and say so, when `config: graph.tool` is `none`): index the worktree with
-the graph CLI (`config: graph.cli`) exactly as `story_setup.py` does, capture the returned project
-name as `graph_project`, and write it to `.workflow/state/story-setup/<stack_project_name>.graph_project`.
-Every later dispatch that reads worktree code passes this `graph_project`; never the main checkout's
-project (`config: graph.main_project`). An indexing failure is not a halt — continue with
-`graph_project` unset and state that graph navigation falls back to grep/read for this story.
-
-**3f — Spec discovery:**
-
-```bash
-ls <worktree_path>/<config: paths.specs_dir>/*.md
-```
-
-Look for a file whose name starts with the story id in dotted or dashed form (ignore
-`*-record.md`, `*-code-review-findings-*.md`). If several match, prefer the shortest filename. Set
-`spec_present` and `spec_path` accordingly.
-
-**3g — Flip sprint status to `in-progress`** (orchestrator; key-addressed, never a line-number edit —
-another session may be editing the file concurrently):
+**3b — Sprint status → `in-progress`** (key-addressed; never a line-number edit):
 
 ```bash
 uv run --no-project .workflow/scripts/sprint_status.py set <story-key> in-progress --note "STARTED <YYYY-MM-DD> slot <N> (<branch>); <phase/priority marker>; dep: <ids or none>; auto-dev-loop"
 uv run --no-project .workflow/scripts/sprint_status.py touch --note "<story-id> started (slot <N>, auto-dev-loop)."
 ```
 
-Notes are capped at `config: sprint_status.note_max_chars`; `set` archives the replaced note to
-`config: paths.story_history_dir`/`<key>.md`; `--history "..."` records long-form detail. If the
-story key is not in sprint status, skip the flip and continue.
+A key missing from sprint status: skip the flip and continue. A failed flip: halt-and-release,
+`failure_step="setup"`.
 
-If any of 3a–3g fails (other than the 3e indexing case): halt-and-release with
-`failure_step="inline-setup"`. Go to Step 1.
+### Step 4 — Spec + checkpoint-1 record
 
-### Step 4 — Auto-spec (conditional)
+**4a — Spec.** With `spec_present: true`: when the project has the `ui-state-reach` skill and
+`story_record.py reach <story_id>` exits 1 (`MISSING`: a frontend story whose spec has no "UI states
+and how each is reached" table), invoke `ui-state-reach` with
+`spec=<spec_path> worktree=<worktree_path> graph_project=<graph_project> mode=auto` and commit the spec
+(`docs: [Story <story_id>] UI states reach table`). Then the open check:
 
-If `spec_present: true`: skip this step.
+```bash
+uv run --no-project .workflow/scripts/story_record.py open <story_id>
+```
 
-Otherwise:
-1. Dispatch the `story-spec` subagent. Pass: story id + title, the epic's AC block for the story
-   (from `config: paths.epics_dir`), `worktree_path`, `graph_project`, `spec_target_path` =
-   `<worktree_path>/<config: paths.specs_dir>/<story-key>.md`, `mode: auto`,
-   `elicitation_rounds: 3`. The agent runs `create-story` non-interactively (best-effort decisions
-   recorded in the spec), then the `advanced-elicitation` rounds, revises once with the union of
-   critiques, and returns `spec_path`. Blocking ambiguity that survives the rounds is logged in the
-   spec; the agent returns its best version.
-2. Set `spec_path` from the agent's report.
-3. On a failed dispatch, retry once per the model-fallback policy in the `parallel-dev-wave` skill.
-   If it still fails: halt-and-release with `failure_step="story-spec"`. Go to Step 1.
+- Exit 0 → 4b.
+- Exit 1 with `[OPEN-Q` lines: halt-and-release, `failure_step="spec-open-questions"`, every marked
+  question in the failure summary.
+- Exit 1 with only a `spec-draft incomplete` record line: dispatch `story-spec` as below with
+  `existing_draft: true`; then items 2–4.
+- `no spec found` (exit 1 or 2): halt-and-release, `failure_step="spec-check"`.
+- Exit 3: read each `CHECK` line with three lines either side in the spec. A line that leaves a
+  question undecided and names no value for the story to build is an open question: halt-and-release,
+  `failure_step="spec-open-questions"`, quoting it. A line that names what the story builds (an
+  interim value, a deferral to another story, a settled history note) is not.
 
-### Step 5 — Preflight gate + auto checkpoint-1 record
+With `spec_present: false`:
+1. When `story_research_pack.py` is installed, build the research pack:
+   `story_research_pack.py <story_id> --worktree <worktree_path>`. Dispatch the `story-spec` subagent
+   (on a failed dispatch retry once per the `parallel-dev-wave` model-fallback policy) with: story id
+   + title, the epic AC block (`config: paths.epics_dir`), `worktree_path`, `graph_project`,
+   `spec_target_path` = `<worktree_path>/<config: paths.specs_dir>/<story-key>.md`, `mode: auto`,
+   `elicitation_rounds: 3`, `research_pack` (when built), and this line: `Run every
+   advanced-elicitation round non-interactively with the critique-pass args — critique lists only, no
+   method menu, no Apply/Reject pause; you revise the spec once with the union.` The agent records
+   best-effort decisions (the recommended option) in the spec and marks a question that is the
+   owner's call `[OPEN-Q <n>]`; it returns `spec_path`, `elicitation_rounds` and `open_questions`.
+2. Set `spec_path`; record `spec-draft complete (story-spec auto mode, <N> elicitation rounds)`.
+3. Any `open_questions`: halt-and-release, `failure_step="spec-open-questions"`, every numbered
+   question in the failure summary. The WIP commit keeps the draft with its markers.
+4. A failed dispatch after the retry: halt-and-release, `failure_step="story-spec"`.
+
+**4b — Record checkpoint-1.** The loop stands in for the owner's spec approval. Append exactly one:
+
+```bash
+uv run --no-project .workflow/scripts/story_record.py append <story_id> "checkpoint-1 spec approved (auto-dev-loop, story-spec auto mode, <N> elicitation rounds complete)"
+uv run --no-project .workflow/scripts/story_record.py append <story_id> "checkpoint-1 spec approved (auto-dev-loop standing authorisation, existing spec used as-is)"
+```
+
+The first after a `story-spec` dispatch, the second when the spec was present. A refusal (an
+`[OPEN-Q]` marker, an incomplete draft): halt-and-release, `failure_step="spec-open-questions"`, with
+the refusal's lines. The phase-gate guard blocks the Step 6 dispatch until this line exists.
+
+### Step 5 — Stack gate
+
+**5a** — `wait_for_stack_ready.py <stack_project_name>`. Non-zero (bring-up failed, timeout, stack
+gone): halt-and-release, `failure_step="stack-bring-up"`, quoting the error and log tail. Skipped,
+and said so, with `config: stack.runtime` = `none`.
+
+**5b** — the gate:
 
 ```bash
 uv run --no-project .workflow/scripts/stack_preflight.py --project-name <stack_project_name> --worktree <worktree_path>
 ```
 
-The script is the gate. Exit 1: dispatch the `dev-preflight` subagent (diagnosis-only, report-only)
-with the script's failing lines, put its diagnosis into the failure summary, and halt-and-release
-with `failure_step="stack-preflight"`. Go to Step 1. With `config: stack.runtime` = `none` the
-script runs its non-stack checks only.
-
-On exit 0, record the autonomous spec approval (the phase-gate guard blocks the `story-impl`
-dispatch without it):
-
-```bash
-uv run --no-project .workflow/scripts/story_record.py append <story_id> "checkpoint-1 spec approved — auto-dev-loop pre-authorization, no human review"
-```
+Exit 0 → Step 6. Exit 1 → optionally dispatch `dev-preflight` (diagnosis only) with the FAIL lines,
+put its diagnosis in the failure summary, then halt-and-release, `failure_step="stack-preflight"`.
+The script is the gate; the agent never is.
 
 ### Step 6 — `story-impl`
 
-Dispatch the `story-impl` subagent. Pass `story_id`, `branch_name`, `worktree_path`,
-`stack_project_name`, `slot`, `graph_project`, `spec_path`.
-
-**Append this hard cap to the dispatch prompt:**
+Dispatch the `story-impl` subagent. Pass, each on its own line: `story_id: <story_id>`,
+`branch_name`, `worktree_path`, `stack_project_name`, `slot`, `graph_project`, `spec_path`. Append:
 
 > AUTO MODE: Maximum 5 batch-fix rounds. If round 5 still shows failing tests, STOP. Stage all current changes with `git add -A`, then commit with subject `wip: [Story <story_id>] auto-loop halted at test-fix round 5`. Report the failure with the last 30 lines of test output. Do NOT return success.
 
-When the agent returns:
-- **Success** (impl commit hash present, tests green, `phase-2 tests` GREEN line in the story
-  record): proceed to Step 7.
-- **WIP halt or any other halt**: halt-and-release with `failure_step="story-impl"`, including the
-  test output the agent surfaced. Go to Step 1.
+- **Success** (impl commit present, tests green, `phase-2 tests GREEN` record line): Step 7.
+- **`story-impl handoff — context cap`**: record it as `parallel-dev-wave` Phase 2 "Context-cap
+  hand-off" does, then dispatch a fresh story-impl (the variant `parallel-dev-wave` "story-impl
+  escalation" names; the `agent_dispatch` guard enforces it) with the same inputs plus
+  `handoff: <handoff_file>` and the cap extended with `Rounds already used by earlier runs: <rounds_used>.`
+  A third hand-off is a halt.
+- **WIP halt or any other halt**: halt-and-release, `failure_step="story-impl"`, with the test output.
 
-### Step 7 — `layered-review` × 3
+**The seed-AC run.** A story implemented before its spec gained a seed AC gets the AC implemented by
+a story-impl run scoped to it, when `story_ledger.py <story_id>` prints `seed ACs due: AC…` (a story
+past phase-3 halts with `failure_step="resume-seed-ac"`):
+1. `<worktree_path>/.story-setup/<story_id>-phase-2.command` must exist; missing: halt-and-release,
+   `failure_step="resume-seed-ac"`.
+2. Commit an uncommitted spec: `docs: [Story <story_id>] seed ACs AC<a>, AC<b>`.
+3. Write `<worktree_path>/.story-setup/seed-acs-<story_id>.md` with `seed_acs: AC<a>, AC<b>`,
+   `done: <every other AC id>`, `green_command: <the saved phase-2 command, verbatim>`.
+4. Dispatch story-impl with Step 6's inputs plus `seed_acs: <that file>` and
+   `seed_base: <git rev-parse HEAD>`, and the AUTO MODE cap with the WIP subject
+   `wip: [Story <story_id>] auto-loop halted at seed-AC test-fix round 5`.
+5. Success (a report with a `seed_acs:` line): re-up the stack (`bring_up_story_stack.py --mode up`)
+   and append `seed ACs implemented: AC<a>, AC<b> (<impl sha12>); re-up ok`. Anything else:
+   halt-and-release, `failure_step="resume-seed-ac"`, naming each seed AC and the output.
 
-Invoke the `layered-review` skill three times in sequence from the main session, each on
-`<merge-base>..HEAD` of the story branch. Pass in the args of every invocation:
+### Step 7 — `layered-review` (one invocation, 3 passes)
 
-- The review target: the diff range `<merge-base>..HEAD` and the absolute `spec_path`.
+**Re-run repro clean-up.** A run for the ledger's `review re-run due: round <m>` first deletes the
+untracked repro test files earlier rounds left (names matching `config: review.repro_test_name_regex`),
+`git rm`s the repro-named files the story's halt WIP commits added (commit
+`wip: [Story <story_id>] drop unadopted repro tests before review round <m>`; none, no commit), and
+confirms each is gone from its container.
 
-- The dispatch preamble (guard-enforced): every review sub-agent prompt MUST lead with
-  `config: review.required_preamble` verbatim. Add, after it: "In this run the findings-evaluator
-  agent performs triage."
-- The slot's `graph_project`, with the note that review sub-agents reading worktree code must use
-  that project and never `config: graph.main_project`.
-- The dispatch directive: dispatch the layers as their typed agents (`blind-hunter`,
-  `edge-case-hunter`, `acceptance-auditor`); on a failed dispatch retry that layer once per the
-  `parallel-dev-wave` model-fallback policy. A layer that errors OR returns no report counts as
-  FAILED — silence is a failure, not a pass.
+Invoke the `layered-review` skill once with:
 
-Collect each run's findings list verbatim. Keep them as separate lists for now.
+```
+story_id: <story_id>
+mode: auto
+passes: 3
+worktree: <worktree_path>
+spec_file: <spec_path>
+graph_project: <graph_project>
+stack_project_name: <stack_project_name>
+```
 
-If a run fails (errors / returns empty): retry it once. If the retry also fails, proceed with the
-successful runs and record, under a `## Partial coverage` heading in the Step 9b file, which run
-failed and why. Do NOT halt the story for one missing run.
+The skill stages the round (its number, kind and diff: a branch round over `<merge-base>..HEAD`, or a
+close-out round over its delta), runs every layer in 3 independent passes, dedupes in code, has
+`findings-verifier` verify every deduped finding, has `repro-writer` write a failing test per
+non-refuted runtime finding where the project has it, writes the findings file and returns
+`failed_layers`, `skipped_layers`, the `ui_*` accounting lines (when a UI verifier ran), `unverified`,
+`counts`, `findings_file`, the `triage` rows and the `refuted` block. REFUTED findings never reach the
+evaluator. Findings of halted rounds are carried into the re-run round, marked `carried:<id>`.
 
-If fewer than 2 of the 3 runs succeed: halt-and-release with
-`failure_step="layered-review-only-1-of-3-succeeded"` (or `-0-of-3-`). One review is below the bar
-for autonomous triage.
+**Coverage rule.** A layer missing in 1 of 3 passes: proceed (the summary names it). A layer missing
+in 2 or more passes: halt-and-release, `failure_step="code-review-layer-missing-2-of-3-passes"`.
 
-### Step 8 — Build `findings_union`
+**UI rule** (when the review ran a UI verifier). No story merges with a UI state left unchecked: an
+unreached state, an `ui_*` accounting line that lists anything or reads `not reported by this run`, a
+failed UI-verifier layer, or one skipped for any reason other than `no changed frontend source` →
+halt-and-release, `failure_step="ui-states-unchecked"`, naming each.
 
-Concatenate the findings from all successful runs. Deduplicate by
-`(reviewer_source, file:line, description_fingerprint)`, where the fingerprint is the first ~80
-characters of the description, lowercased. Findings with the same fingerprint at the same file:line
-collapse into one entry that records how many runs flagged it. Keep every unique finding, including
-ones only one run produced (union, not consensus).
+The skill stops without a result: halt-and-release, `failure_step="layered-review"`. It stops because
+the project's review workflow tool is unavailable: stop the loop ("Allowed stops").
 
-### Step 8b — Findings verification (`findings-verifier`)
+**The review preamble** — Steps 8 and 9 lead their dispatch prompts with
+`config: review.required_preamble` verbatim, then: "In this run the findings-evaluator agent performs
+triage; defer only when the fix needs scope outside this story or a design or spec decision."
 
-Same pass as `parallel-dev-wave` Post-Phase 2b. Dispatch the `findings-verifier` subagent (prompt
-leads with `config: review.required_preamble`; names `graph_project`, or `none`) with every finding
-in `findings_union`, keyed by a stable finding id, each carried verbatim (id, claim, cited file:line,
-layer evidence) — never the findings-file path, which the verifier does not read. Split the union across several dispatches when it
-is large; every finding goes to exactly one verifier.
+### Step 8 — Re-verify UNVERIFIED findings
 
-- **Silence is a failure.** A dispatch counts as FAILED if it errors, returns no report, or covers
-  fewer findings than assigned. Retry a failed dispatch once. `findings-verifier` has no model
-  fallback. If the retry also fails: halt-and-release with `failure_step="findings-verifier"`.
-  Never pass an unverified finding to Step 9.
-- **REFUTED** → auto-dismissed with the verifier's evidence. Never sent to the evaluator; listed in
-  the Step 9b file under `dismissed_findings` with reason `refuted by findings-verifier`.
-- **CONFIRMED / UNVERIFIABLE** → `verified_findings`, each carrying its verdict, evidence and
-  `bar impact:` line verbatim. A finding without a `bar impact:` line (verifier partial failure)
-  counts as unverified: re-dispatch it; never invent the line.
+Empty `unverified`: skip. Otherwise dispatch `findings-verifier` once with every unverified finding
+inline (the finding's section of the latest round, never the file path; no model fallback; retry a
+failed dispatch once). Update the triage rows with the verdicts. A finding re-verified REFUTED goes to
+Step 9b's `dismissed_findings`. Any finding still without a verdict: halt-and-release,
+`failure_step="code-review-unverified-finding"`.
 
 ### Step 9 — `findings-evaluator`
 
-Dispatch the `findings-evaluator` subagent (its prompt leads with `config: review.required_preamble`,
-followed by the sentence "This dispatch comes from auto-dev-loop." — the evaluator refuses any
-dispatch that does not state it). Pass `story_id`, `worktree_path`, `spec_path`, `graph_project`, the quality-bar doc path
-(`config: paths.quality_bar_doc`, or "none configured"), and `verified_findings` inline (Step 8b —
-REFUTED findings are not passed).
+No triage rows and no UI out-of-scope claims: go to Step 9b with all lists `none`. Otherwise dispatch
+`findings-evaluator`: the preamble, the sentence "This dispatch comes from auto-dev-loop.", then
+`story_id`, `round: <n>`, the round's Summary lines, `worktree_path`, `spec_path`, `graph_project`,
+`findings_file`, the quality-bar doc (`config: paths.quality_bar_doc`, or "none configured") and the
+triage rows inline (UI out-of-scope claims with the UI diff path, when present). A close-out round is
+triaged under the `rules-defer` skill's auto mode when the project has it.
 
-It returns `patch_list`, `defer_list`, `dismiss_list` — each finding with a one-line reason — plus,
-when a quality bar is configured, a `## Bar-blocking — needs human triage` list. **There is no human
-triage step**: the evaluator's call is final, with one exception below.
+It returns patches as manifest rows (`finding_id | file | line | change | notes | repro_test`), defers
+and dismissals, each with one-line reasoning. **There is no human triage step.**
 
-If the evaluator fails: retry once per the model-fallback policy; then halt-and-release with
-`failure_step="findings-evaluator"`. Go to Step 1.
+- Evaluator fails (after the model-fallback retry): halt-and-release, `failure_step="findings-evaluator"`.
+- A finding it flags as needing human review, or a defer that needs a new story or an owner decision:
+  halt-and-release, `failure_step="findings-evaluator-needs-human"`, naming each id and question.
+- A rejected or unruled UI out-of-scope claim: halt-and-release, `failure_step="ui-states-unchecked"`.
+- **Bar-blocking findings.** With no quality bar configured this gate is skipped (say so in 9b).
+  Otherwise the evaluator never defers or dismisses a finding it assesses as bar-blocking: it patches
+  it, and returns it under `## Bar-blocking — needs human triage` only when the verifiers split, when
+  no fix exists without scope the spec lacks, or when the fix contradicts the spec or a record. A
+  non-empty list: halt-and-release, `failure_step="bar-blocking-finding"`, quoting each entry's bar
+  and consequence. Severity is never pre-authorized.
 
-**Quality-bar-blocking findings are not auto-triageable.** When `config: paths.quality_bar_doc` is
-empty, this gate is skipped — state "bar gate skipped (no quality bar configured)" in the Step 9b
-file. Otherwise a finding the verifier marked `bar impact: BLOCKING` is binding: the evaluator may
-not defer or dismiss it, and may escalate a `none` finding it judges bar-blocking on the code. The
-evaluator never defers or dismisses a finding it assesses as bar-blocking; it
-patches it, or returns it under `## Bar-blocking — needs human triage`. If that list is non-empty:
-halt-and-release with `failure_step="bar-blocking-finding"`, quoting each entry's bar id and
-consequence in the failure summary. Go to Step 1. The log names the bar, never a severity tier —
-severity is the owner's call.
+### Step 9b — Persist the triage decisions
 
-### Step 9b — Write the findings file (every decision documented)
+Write each defer's tracking row first, in the main checkout (never a story worktree): a row in the
+project's backlog or the epic of a not-done story naming `<story_id> <finding_id>`, committed as your
+own change; fill its `tracked in` into the defer. Then append to `findings_file`:
 
-Every finding gets a machine-decided classification; the owner must be able to audit, after the
-fact, why each one was patched, deferred or dismissed. Write this file in the worktree BEFORE Step 10
-so `story-finalize` commits it with the patches:
+~~~markdown
+## Triage decisions — <YYYY-MM-DD>
 
-```
-<worktree_path>/<config: paths.specs_dir>/<story-key>-code-review-findings-<YYYY-MM-DD>.md
-```
-
-Format (every finding appears exactly once, with reasoning):
-
-```markdown
-# Code Review Findings — Story <story_id> (auto-dev-loop)
-
-Generated by findings-evaluator over <R> layered-review runs (union of <N> deduplicated findings;
-<V> verified by findings-verifier: <C> confirmed, <U> unverifiable, <F> refuted).
+Triaged by findings-evaluator (auto-dev-loop); no human triage. Patched <X>, deferred <Y>, dismissed <Z>.
 Bar gate: <applied against <quality bar doc> | skipped (no quality bar configured)>
 
-## Raw review runs
-<each successful run's findings verbatim, under "### Run 1" / "### Run 2" / "### Run 3">
+### approved_patches (patch manifest)
 
-## Partial coverage
-<only if a run failed: which run and why>
-
-## Verification
-<per finding: id — CONFIRMED | REFUTED | UNVERIFIABLE — evidence — bar impact line (not for REFUTED)>
-
-## Triage decisions — <YYYY-MM-DD> (auto-dev-loop: findings-evaluator, pre-authorized; no human triage)
-
-- Patched: <X> · Deferred: <Y> · Dismissed: <Z>
-
-### approved_patches
-finding_id | file (repo-relative) | line | change (one imperative sentence) | notes
-<one manifest row per patched finding>
-
-<then per patched finding:>
-#### P1. <one-line title>
-- **Source:** <blind-hunter | edge-case-hunter | acceptance-auditor> (<k> of <R> runs)
-- **Finding:** <verbatim description>
-- **Verification:** <CONFIRMED | UNVERIFIABLE> — <evidence> — <bar impact line>
-- **Reasoning:** <one line — why patch>
-
-### deferred_findings
-#### D1. <title>
-- **Source / File:** <reviewer> · `<file:line>`
-- **Finding:** <verbatim>
-- **Logged in:** `config: paths.deferred_work_dir`/`story-<id>.md`
-- **Reasoning:** <one line — why defer rather than patch/dismiss>
-
-### dismissed_findings
-#### X1. <title>
-- **Source / File:** <reviewer> · `<file:line>`
-- **Finding:** <verbatim>
-- **Reasoning:** <one line — refuted by findings-verifier (evidence) / false positive / out of stage / redundant / ...>
+```
+<finding_id> | <file (repo-relative)> | <line> | <change — one imperative sentence> | <notes> | <repro_test or ->
 ```
 
-The `## Triage decisions` section with its three lists is the durable triage record the phase-gate
-guard requires before the `story-finalize` dispatch. With zero findings, still write the file with
-the three lists each reading `none — clean review`.
+### deferred_findings
+
+- **<finding_id>** — <title> — bar impact: none — waits on: <scope or decision> — tracked in: `<path>` — `<key>` — reasoning: <one line>
+
+### dismissed_findings
+
+- **<finding_id>** — <title> — reasoning: <one line>
+
+### ui_out_of_scope_rulings
+
+- <state> — <kind> — accepted | rejected — reasoning: <one line>
+~~~
+
+Write all four headings every time (`none` under an empty one). The phase-gate guard blocks the
+`story-finalize` dispatch until the section exists; `story-finalize` commits it with the patches.
 
 ### Step 10 — `story-finalize`
 
-Dispatch the `story-finalize` subagent. Pass `story_id`, `branch_name`, `worktree_path`,
-`stack_project_name`, `graph_project`, `approved_patches` (the manifest), `deferred_findings`,
-`dismissed_findings`, `round: 1`, and the findings file path.
+**Fold a resumed branch first.** When `git log --format=%s <base>..HEAD` lists a
+`wip: [Story <story_id>]` commit, or more than one commit and one of them a docs commit, or more
+than one commit in story-impl's format, fold the `wip:` and docs commits into the impl commit by
+`parallel-dev-wave`'s "A story resumed after an auto-dev-loop halt", step 2 (once a close-out commit
+exists, a later commit folds into it). A failed fold: halt-and-release, `failure_step="resume-fold"`.
 
-**Append this hard cap to the dispatch prompt:**
+Dispatch `story-finalize` with `story_id`, `branch_name`, `worktree_path`, `stack_project_name`,
+`graph_project`, `approved_patches` (state the row count), `deferred_findings`, `dismissed_findings`,
+`last_round: yes`, and append:
 
 > AUTO MODE: Maximum 5 batch-fix rounds after applying patches. If round 5 still shows failing tests, STOP. Stage all current changes with `git add -A`, then commit with subject `wip: [Story <story_id>] auto-loop halted at finalize test-fix round 5`. Report the failure with the last 30 lines of test output. Do NOT return success.
 
-When the agent returns:
-- **Success** (close-out commit landed or none needed, `phase-3 tests` GREEN line recorded): Step 11.
-- **WIP halt or any failure**: halt-and-release with `failure_step="story-finalize"`. Do NOT invoke
-  `land-story`. Go to Step 1.
+- **Success**: when `story_ledger.py <story_id>` prints `review re-run due: round <m>` or
+  `review round due: round <n>`, go to Step 7 for that round (driver mode: end the session);
+  otherwise Step 11.
+- **WIP halt or any failure**: halt-and-release, `failure_step="story-finalize"`. Never invoke
+  `land-story`.
 
-### Step 11 — Auto checkpoint-3 record + `land-story`
+### Step 11 — Checkpoint-3 record, land window, `land-story`
 
-Record the autonomous merge approval (the phase-gate guard blocks `land-story` without it):
+**11a** — `story_record.py check <story_id> phase-3`. Exit 1: halt-and-release,
+`failure_step="phase-3-no-green-record"`.
 
-```bash
-uv run --no-project .workflow/scripts/story_record.py append <story_id> "checkpoint-3 merge approved — auto-dev-loop pre-authorization, no human review"
-```
+**11a′ — Gate decision.** When the working rules' "Pre-merge full gate" does not require the gate for
+this change, record `pre-merge gate not required — <the clause that applies>`; when in doubt it is
+required and nothing is recorded.
 
-Then invoke the `land-story` skill with `story_id`. It does: `git merge <config: git.merge_style>` →
-`post-merge-smoke` → cleanup (orphan watch kill, stack down, worktree remove, branch delete, slot
-reset) → sprint status `done`.
+**11a″ — Propagation, parked for the owner.** Dispatch `story-propagate` with `mode: propose` (the
+inputs of `parallel-dev-wave`'s Propagation section). Write its checklist to
+`<worktree_path>/.story-setup/propagation-<story_id>.md`, never with a `## Decisions` section. For
+each `Cascades:` entry, name its target story:
+- **Target holds an `in_use` slot**: halt-and-release, `failure_step="propagation-cascade"`, with the entry.
+- **Target holds no slot and has a spec** in its kept worktree: append
+  `[OPEN-Q <n>] cascade from <story_id> (propagation P<k>): <the entry verbatim>` to that spec's open
+  questions and commit it on the target's branch.
+- **Target has no spec**: `sprint_status.py history <target> --append "Cascade from <story_id> (P<k>): <the entry>"`
+  and commit only that change.
 
-If `land-story` halts on a merge conflict or a smoke failure: do NOT retry the merge and do NOT
-resolve conflicts. Inspect what completed first — if the merge landed but smoke failed, the
-failure summary must say the merge is already in `config: git.base_branch`. Then halt-and-release
-with `failure_step="land-story-<merge-conflict|smoke-failure>"`.
+Pick no option. Record `propagation cascades moved: …` (when any) and
+`propagation parked for the owner: <n> rows in propagation-<story_id>.md; NEXT: /propagate-story-changes story=<story_id>`.
 
-On success the slot is `free` (released by `land-story`'s cleanup) and sprint status shows `done`.
+**11a‴ — Schema check.** When `config: pipeline.schema_globs` is set and
+`git diff --name-only <base>...HEAD` matches one: read the record and spec for the kind of change.
+Additive and stated: go on. Structural (rename, type change, dropped column, key change) or unstated:
+halt-and-release, `failure_step="migration-reset-structural"`. Never infer the kind from the diff.
+
+**11b — Record checkpoint-3**: `checkpoint-3 merge approved (auto-dev-loop standing authorisation)`.
+After a `checkpoint-3 approval withdrawn -- train gate exit <rc>` line no new authorisation is
+recorded: 11c.1 halts instead.
+
+**11c — Land window.** One story at a time holds the lease from `acquire` to `land-story`'s release.
+Without `land_lease.py` installed, steps 1–3b are skipped (say so) and the gate (step 4) runs directly.
+
+1. `land_lease.py acquire <story_id>` (one attempt, foreground). Exit 0: step 2. Exit 1 (no standing
+   approval): a `withdrawn -- train gate exit` verdict → halt-and-release, `failure_step="train-gate"`;
+   a `withdrawn -- pre-merge gate` verdict → `failure_step="pre-merge-gate"`; otherwise
+   `failure_step="land-lease-no-approval"`. Exit 2: halt-and-release, `failure_step="land-lease-error"`.
+   Exit 3 (lease held, or stories ahead):
+   - Driver mode: end with `AUTO-DEV-PHASE story=<story_id> outcome=waiting step=11c.1`. Nothing is
+     torn down; the driver waits in the line, builds and gates the train, and starts a fresh session
+     at the story's turn.
+   - Without the driver: run `merge_train.py wait <story_id>` in the background and wait for its exit.
+     Exit 0: step 2. Exit 3 (a stalled holder or head of line): halt-and-release,
+     `failure_step="land-lease-timeout"`. Exit 4 (a red train gate): `failure_step="train-gate"`.
+   - Before step 2, every window: `merge_train.py home <story_id>` (exit 2: `failure_step="land-window-rebase"`).
+2. Fold a resumed branch as in Step 10 (a commit after the close-out folds into the close-out). A
+   failed fold: `failure_step="resume-fold"`.
+3. **Final rebase.** Skip when `merge-base --is-ancestor <base> <branch>` holds. Otherwise:
+   1. `branch_overlap.py <branch> --base <base> --repo <worktree_path>` (exit 2:
+      `failure_step="land-window-rebase"`).
+   2. Dispatch `story-rebase` with `target: <base>`, `validate: stack`, `range_diff_path`, the OVERLAP
+      and CONFLICTS lists, and these per-file rules:
+      - Any per-file rule `story-rebase` or this dispatch names decides first.
+      - For each listed file, the spec sections that govern it.
+      - Always a HALT: a conflict in a dependency manifest or lockfile (`config: env.dependency_files`);
+        they are never edited by hand.
+      - Mechanical, resolve it: both sides' changes can be kept in full (independent additions, or
+        edits to different lines git reported as one hunk).
+      - A design or scope call, HALT with file:line and the options: keeping both sides is impossible,
+        or the result would change behaviour neither side wrote.
+   3. Resolved conflicts: append `land-window rebase onto <sha12>: <n> conflicted files resolved — <file>: <resolution>; …`.
+      A HALT: halt-and-release, `failure_step="land-window-rebase"`.
+3b. When the latest pre-merge verdict is a train GREEN or `pre-merge gate not required — …`, run
+   `merge_train.py settle <story_id>`: exit 0 skips step 4; exit 1 → step 4; exit 2:
+   `failure_step="land-window-rebase"`.
+4. **Gate** (unless exempt): `run_full_suite.py --story-id <story_id> --record`. All green records
+   `pre-merge gate GREEN` itself. A non-zero exit withdraws the checkpoint-3 approval and releases the
+   lease; when the run was killed before its exit handler (`land_lease.py holds <story_id>` exits 0),
+   append `checkpoint-3 approval withdrawn -- pre-merge gate exit <rc>` and release the lease yourself.
+   Then halt-and-release, `failure_step="pre-merge-gate"`, with the failing test ids. A run that could
+   not start the gate (preflight failed) withdraws nothing: halt-and-release,
+   `failure_step="pre-merge-gate-not-run"`, with the preflight FAIL lines.
+5. Invoke the `land-story` skill with `<story_id>`: merge → `post-merge-smoke` → cleanup → sprint
+   status `done` → lease release.
+
+A `land-story` dispatch blocked because the base branch moved past the gated base: re-run 11c from
+step 3 once, keeping the lease; a second block: halt-and-release, `failure_step="land-guard"`. Never
+write a `pre-merge base accepted` override line.
+
+`land-story` halts on a merge conflict or a smoke failure: never retry the merge, never resolve it.
+Inspect what completed — if the merge landed but smoke failed, say in the failure summary that the
+merge is already in the base branch. Then halt-and-release,
+`failure_step="land-story-<merge-conflict|smoke-failure>"`.
+
+On success the slot is `free` and sprint status reads `done`.
 
 ### Step 12 — Next iteration
 
-Increment the started-story count, check `max_stories`, and loop back to Step 1.
+Increment the started-story count, check the cap, and loop back to Step 1.
 
 ---
 
 ## Forbidden in this mode
 
-- **Do NOT ask the owner for confirmation** at any step. If you want to ask "is this OK?", make the
-  best available decision and continue — except for the cases under "Allowed stops".
-- **Do NOT skip the failure-log entry** when halting a story. It is the owner's only record of what
-  went wrong.
-- **Do NOT auto-resolve merge conflicts.** Log as WIP and move on.
-- **Do NOT delete the branch** of a halted story. The branch preserves the WIP commit and is how the
-  owner resumes it.
-- **Do NOT write a record line claiming a human approved or triaged anything.** Every auto-written
-  checkpoint or triage record names the auto-dev-loop pre-authorization.
-- **Do NOT disable or bypass a guard** to get past a block. A guard block on a story is a
-  halt-and-release with `failure_step="guard-blocked-<guard>"`.
+- **Do NOT ask the owner for confirmation** at any step — except under "Allowed stops".
+- **Do NOT skip the failure-log entry** when halting. It is the owner's only record of what went wrong.
+- **Do NOT resolve a conflict that needs a design or scope call**, and never resolve a `land-story`
+  merge conflict.
+- **Do NOT delete the branch, worktree or stack data** of a halted story.
+- **Do NOT write a record line or a `## Triage decisions` section the loop has not reached** to get
+  past a phase-gate block: a blocked dispatch is a halt-and-release, `failure_step="<step>-phase-gate"`,
+  naming the missing fact.
+- **Do NOT remove an `[OPEN-Q]` marker's brackets, or write a `spec-draft complete` line,** to get past
+  a checkpoint-1 refusal. Only a ruling replaces a marker.
+- **Do NOT write a record line claiming a human approved or triaged anything.**
+- **Do NOT disable or bypass a guard.** A guard block on a story is a halt-and-release,
+  `failure_step="guard-blocked-<guard>"`.
 
 ---
 
 ## Allowed stops (surface to the owner)
 
-These are infrastructure problems, not story decisions — stop the loop and surface them:
+These are infrastructure problems, not story decisions — stop the loop (driver mode:
+`outcome=infra-stop`):
 
-- `reserve_slot.py` returns `error` (lock misbehaved, file permission, registry parse).
-- All `config: slots.count` slots stay `in_use` for more than 5 minutes.
-- `milestone-blockers` itself errors (a missing milestone config key, an unreadable map — not an
-  empty `STARTABLE`, which is clean termination), or `sprint_status.py list` errors.
+- `reserve_slot.py` returns `error`.
+- Every slot stays `in_use` for more than 5 minutes.
+- `milestone-blockers` itself errors (a missing milestone key, an unreadable map, an unreadable
+  failure log or sprint status — not an empty `STARTABLE`, which is clean termination), or
+  `sprint_status.py list` errors.
+- Step 2 refuses the picked story as halted.
+- `halt_release.py` exits 1 (`partial`).
+- The review stops because the project's review workflow tool is unavailable in this session.

@@ -48,18 +48,40 @@ class LogFailureTests(unittest.TestCase):
         self.assertIn("- branch: feat/7-2 (PRESERVED", body)
         self.assertIn("- wip_commit: abc1234", body)
         self.assertIn("FAIL: x", body)
-        self.assertIn("git worktree add ", body)
-        self.assertIn("/wt/7-2 feat/7-2", body)
+        self.assertIn("/wt/7-2`, branch `feat/7-2`", body)
+        self.assertIn("resume_halted.py 7-2 --ruling", body)
         self._main()
         self.assertEqual(log.read_text(encoding="utf-8").count("## 7-2 — "), 2)
         self.assertEqual(log.read_text(encoding="utf-8").count("# Auto-Dev Loop"), 1)
 
     def test_held_mutex_times_out_with_error_json(self):
-        with NamedMutex(log_failure.MUTEX_NAME, 1000):
+        with NamedMutex(log_failure.LOG_MUTEX, 1000):
             code, res = self._main()
         self.assertEqual(code, 1)
         self.assertEqual(res["status"], "error")
         self.assertFalse((self.root / "logs" / "failures.md").exists())
+
+    def test_line_break_in_heading_flag_is_refused(self):
+        for flag in ("--story-id", "--failure-step", "--branch-name", "--wip-commit"):
+            argv = list(ARGS) + ["--wip-commit", "a"]
+            i = argv.index(flag)
+            argv[i + 1] = "x\ny"
+            with self.assertRaises(SystemExit) as cm, contextlib.redirect_stderr(io.StringIO()):
+                log_failure.main(argv)
+            self.assertEqual(cm.exception.code, 2, flag)
+        self.assertFalse((self.root / "logs" / "failures.md").exists())
+
+    def test_multiline_summary_is_indented_and_branch_none_has_no_resume(self):
+        argv = list(ARGS)
+        argv[argv.index("--failure-summary") + 1] = "first\r\n\n- asked_of: x"
+        argv[argv.index("--branch-name") + 1] = "none"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(log_failure.main(argv), 0)
+        body = (self.root / "logs" / "failures.md").read_text(encoding="utf-8")
+        self.assertIn("- failure_summary: first\n  \n  - asked_of: x\n", body)
+        self.assertIn("- branch: none", body)
+        self.assertNotIn("Resume:", body)
 
 
 if __name__ == "__main__":
