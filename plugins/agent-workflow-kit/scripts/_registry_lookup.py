@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Read-only lookup of one story's row in the slot registry (`config: paths.slot_registry`).
+
+Registry format (markdown table, one row per slot):
+
+    | Slot | Status | Story ID | Branch | Worktree | Since |
+    |------|--------|----------|--------|----------|-------|
+    | 1    | free   | —        | —      | —        | —     |
+    | 2    | in_use | 7-92      | story/7-92 | ../proj-worktrees/7-92 | 2026-01-01 |
+
+Empty cells are `—` (U+2014), `-` or blank. A relative Worktree cell resolves against the
+repo root. Free rows never match.
+
+Used by story_ledger.py, story_record.py, run_full_suite.py and run_scoped_tests.py.
+Writing the registry is NOT done here (slot reservation owns that, under its mutex).
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import wfconfig  # noqa: E402
+import slot_registry  # noqa: E402
+
+
+def registry_path() -> Path:
+    return slot_registry.registry_path()
+
+
+def rows() -> list[dict]:
+    """Every data row of the registry table as a dict. Missing registry → []."""
+    try:
+        text = registry_path().read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return []
+    return slot_registry.parse_rows(text.splitlines())
+
+
+def find(story_ids: list[str] | str) -> dict | None:
+    """The non-free row whose Story ID equals one of `story_ids` (case-insensitive).
+
+    Adds `worktree_path` (a resolved Path, or None when the cell is empty).
+    """
+    ids = [story_ids] if isinstance(story_ids, str) else list(story_ids)
+    wanted = {i.strip().lower() for i in ids if i.strip()}
+    for row in rows():
+        if row["status"] in ("free", "") or not row["story_id"]:
+            continue
+        if row["story_id"].lower() in wanted:
+            wt = row["worktree"]
+            if wt:
+                p = Path(wt)
+                if not p.is_absolute():
+                    p = wfconfig.repo_root() / p
+                row["worktree_path"] = p.resolve()
+            else:
+                row["worktree_path"] = None
+            return row
+    return None

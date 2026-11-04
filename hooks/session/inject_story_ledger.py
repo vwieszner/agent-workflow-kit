@@ -10,7 +10,7 @@ Reads the slot registry (`config: paths.slot_registry`, a markdown table whose r
 returned markdown it prints only the `**Position:**` line and the `**RESUMABLE...` line —
 never the full ledger. At most `config: slots.count` stories.
 
-Prints NOTHING when every slot is free. Fail-silent: any error exits 0 with no output.
+Prints NOTHING when every slot is free. `text()` returns the same output for session_start.py. Fail-silent: any error exits 0 with no output.
 """
 from __future__ import annotations
 
@@ -56,16 +56,17 @@ def load_ledger():
     return mod
 
 
-def main() -> int:
+def text() -> str:
+    """The position block for every in-flight story, or "" when none is in flight."""
     import wfconfig
 
     registry = wfconfig.path("paths.slot_registry", "docs/implementation-artifacts/slot-registry.md")
     stories = in_flight(registry, int(wfconfig.get("slots.count", 6)))
     if not stories:
-        return 0
+        return ""
     mod = load_ledger()
     if mod is None:
-        return 0
+        return ""
     lines: list[str] = []
     for slot, story in stories:
         try:
@@ -81,10 +82,13 @@ def main() -> int:
             if res:
                 lines.append(f"    {res.replace('**', '').strip()[:200]}")
     if not lines:
-        return 0
-    print("=== In-flight stories (position only) ===")
-    print("\n".join(lines))
-    print("  Full ledger: uv run --no-project .workflow/scripts/story_ledger.py <story-id>")
+        return ""
+    return ("=== In-flight stories (position only) ===\n" + "\n".join(lines) + "\n"
+            "  Full ledger: uv run --no-project .workflow/scripts/story_ledger.py <story-id>\n")
+
+
+def main() -> int:
+    sys.stdout.write(text())
     return 0
 
 

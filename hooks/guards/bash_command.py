@@ -30,6 +30,11 @@ Rules (exit 2 + stderr on any match):
      a heredoc body fed to a container is never flagged.
   6. Project rules (`config: guards.command_deny`): [{pattern, reason}].
 
+Heredoc bodies (`cat > f <<'EOF'`, `python - <<'EOF'`, `git commit -F - <<EOF`) are blanked
+before rules 1-3, 4, 5 and 6, except a body a host shell runs (`bash <<EOF`, `VAR=1 sh <<EOF`,
+`cat <<'EOF' | bash`), whose lines are commands. Rule 4 reads a `$(...)` opened inside double
+quotes as bash does: its body is a fresh quoting context. Rule 4a reads the raw command.
+
 Remedy for a legitimate exception: the owner runs the command from their own shell.
 """
 from __future__ import annotations
@@ -56,19 +61,21 @@ def evaluate(payload: dict) -> int:
     if not isinstance(cmd, str) or not cmd:
         return 0
 
-    violations = g.git_violations(cmd)
-    violations += g.destructive_violations(cmd)
-    violations += g.recursive_delete_violations(cmd, str(payload.get("cwd") or os.getcwd()))
-    violations += g.host_install_violations(cmd)
-    if _WIN_PATH_RE.search(g.unquoted_residue(cmd)):
+    # Heredoc bodies carry content, not commands (a body a host shell runs is kept).
+    body_blanked = g.blank_heredoc_bodies(cmd, keep_host_shell_bodies=True)
+    violations = g.git_violations(body_blanked)
+    violations += g.destructive_violations(body_blanked)
+    violations += g.recursive_delete_violations(body_blanked, str(payload.get("cwd") or os.getcwd()))
+    violations += g.host_install_violations(body_blanked)
+    if _WIN_PATH_RE.search(g.unquoted_residue(body_blanked, track_substitutions=True)):
         violations.append(
             "[bash-winpath] unquoted backslash path. Bash strips unquoted backslashes "
             "('dir\\sub\\x.cmd' becomes 'dirsubx.cmd'), so the command will not run as "
             "written. Quote the path, use forward slashes, or (Windows) use the PowerShell tool."
         )
     violations += g.host_python_violations(cmd)
-    violations += g.host_forbidden_violations(cmd)
-    violations += g.command_deny_violations(cmd)
+    violations += g.host_forbidden_violations(body_blanked)
+    violations += g.command_deny_violations(body_blanked)
 
     if violations:
         return g.block(

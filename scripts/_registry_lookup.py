@@ -6,7 +6,7 @@ Registry format (markdown table, one row per slot):
     | Slot | Status | Story ID | Branch | Worktree | Since |
     |------|--------|----------|--------|----------|-------|
     | 1    | free   | —        | —      | —        | —     |
-    | 2    | in_use | 7-2      | story/7-2 | ../proj-worktrees/7-2 | 2026-01-01 |
+    | 2    | in_use | 7-92      | story/7-92 | ../proj-worktrees/7-92 | 2026-01-01 |
 
 Empty cells are `—` (U+2014), `-` or blank. A relative Worktree cell resolves against the
 repo root. Free rows never match.

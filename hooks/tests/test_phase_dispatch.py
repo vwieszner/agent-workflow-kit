@@ -27,14 +27,16 @@ class PhaseDispatchRouting(HookTestCase):
 
     def test_extract_story_id(self):
         mod = load_module()
-        self.assertEqual("7-21", mod.extract_story_id("story_id: 7-21\nworktree_path: x"))
-        self.assertEqual("8-3", mod.extract_story_id("branch_name: story/8-3"))
-        self.assertEqual("9-1", mod.extract_story_id("work on story/9-1 now"))
+        self.assertEqual("7-921", mod.extract_story_id("story_id: 7-921\nworktree_path: x"))
+        self.assertEqual("8-93", mod.extract_story_id("branch_name: story/8-93"))
+        self.assertEqual("9-91", mod.extract_story_id("work on story/9-91 now"))
         self.assertIsNone(mod.extract_story_id("no id here"))
 
     def test_opencode_skill_name_field(self):
         mod = load_module()
-        mod.fact_recorded = lambda s, k: False
+        mod.fact_recorded = lambda s, k, timeout=None: (False, "")
+        mod.lease_held = lambda s, timeout=None: (True, "")
+        mod.worktree_branch = lambda s, timeout=None: (True, "")
         buf = io.StringIO()
         with redirect_stderr(buf), redirect_stdout(io.StringIO()):
             got = mod.evaluate({"tool_name": "Skill", "tool_input": {"name": "land-story", "args": "st-x"}})
@@ -57,6 +59,10 @@ class PhaseDispatchRecordCheck(HookTestCase):
     def test_ungated_passes(self):
         payload = {"tool_name": "Agent", "tool_input": {"subagent_type": "Explore", "prompt": "x"}}
         self.assertEqual(0, self.exit_code(HOOK, payload))
+
+    def test_unreadable_payload_blocks(self):
+        p = self.run_hook(HOOK, "{not json", [])
+        self.assertEqual(2, p.returncode)
 
     def test_switch_off(self):
         self.write_config("[guards]\nphase_dispatch = false\n")

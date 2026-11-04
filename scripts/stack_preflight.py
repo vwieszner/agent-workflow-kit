@@ -29,7 +29,7 @@ check runs.
 
 Usage:
   uv run --no-project .workflow/scripts/stack_preflight.py --project-name story-7-50 \
-      --worktree <worktree path> [--expected-branch story/7-50] [--slot N]
+      --worktree <worktree path> [--expected-branch story/7-950] [--slot N]
   uv run --no-project .workflow/scripts/stack_preflight.py --project-name <config: slots.shared_stack_name>
       (shared stack: --worktree defaults to the repo root, branch to config: git.base_branch)
 
@@ -145,7 +145,8 @@ def check_watch(worktree: Path) -> bool:
                                 f"cwd={worktree}")
         return True
     record("FAIL", "watch", f"no compose-watch process anchored in {worktree} — edits will NOT sync; "
-                            "restart via bring_up_story_stack.py --mode watch (carries ALL port vars)")
+                            "restart via bring_up_story_stack.py --mode watch (carries ALL port vars) in the "
+                            "background, then wait_for_watch_ready.py <the watch task's output file>")
     return False
 
 

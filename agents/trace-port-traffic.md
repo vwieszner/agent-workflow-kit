@@ -88,8 +88,10 @@ Report to the caller:
 - **What the source is**, in plain language (e.g. "a shell `until` loop spawned by PID X", "a
   scheduled task in the worker container").
 - **Why it misfires**, if the fingerprint shows it (empty body, wrong endpoint, missing auth).
-- **A concrete fix path** scoped to the actual source. Present PIDs and the kill command as a
-  suggestion only — killing processes from another session requires the owner's explicit go-ahead.
+- **A concrete fix path** scoped to the actual source. Present PIDs and the stop command as a
+  suggestion only (`.workflow/scripts/kill_owned.py --pid <pid>` for a process the caller owns;
+  raw `kill` / `taskkill` / `Stop-Process` are denied by the process-kill guard) — stopping a process
+  from another session requires the owner's explicit go-ahead.
 
 ## Failure modes (by exit code)
 

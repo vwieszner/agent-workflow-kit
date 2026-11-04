@@ -6,6 +6,7 @@ tier: standard
 effort: high
 tools: [read, grep, glob, bash]
 readonly: true
+claude: {maxTurns: 60}
 ---
 
 # Dev Stack Preflight — Diagnosis Agent
@@ -90,7 +91,7 @@ Determine which kind of drift it is:
 - **Model-vs-schema-definition drift** — the code's model changed without the schema definition being updated. Use the project's read-only check command if one is configured in `config: stack.health.checks`.
 - **Schema-definition-vs-live-store drift** — the schema files (`config: pipeline.schema_globs`) changed after the slot's live store was initialised. Compare `git log` / `git diff` of those globs since the stack's bring-up (the `started_at` in `.workflow/state/story-setup/<stack>.json`) against the live store's actual structure (read-only introspection).
 
-Recommend the reset path: additive change → apply the additive change in place; structural change → full reset via `bring_up_story_stack.py --mode down` then `--mode up`, followed by `config: pipeline.post_reset_cmds`. Slot stacks hold no data worth keeping, so a full reset is the safe default when in doubt.
+Recommend the reset path: additive change → apply the additive change in place; structural change → on a story stack a full reset via `bring_up_story_stack.py --mode down` then `--mode up`, followed by `config: pipeline.post_reset_cmds`; on the shared stack the wipe is the owner's, by hand (`bring_up_story_stack.py` refuses `down` there). Slot stacks hold no data worth keeping, so a full reset is the safe default when in doubt.
 
 ### Step 4 — Watch process (story slots, when `config: stack.watch`)
 

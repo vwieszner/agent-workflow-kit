@@ -10,11 +10,26 @@ the orchestrator proceeds to Checkpoint 1 (spec review). Updates a per-stack
 JSON status file that wait_for_stack_ready.py polls before the stack preflight.
 
 Status file lifecycle:  starting -> up      (happy path)
-                        starting -> failed  (any compose / readiness error)
+                        starting -> failed  (any compose / readiness error, or a failed seed)
+                        starting -> retrying -> up | failed   (a failed seed on a FRESH stack)
+
+Seed (`config: stack.seed_cmd`, story stacks only; "" → none): after the ready poll and before
+compose watch (watch's sync+restart would end an exec'd seed), the seed command runs in the
+stack. Outcomes: "ok"; "absent" (output matches `config: stack.seed_absent_regex` — the tree
+predates the seed); "failed: <detail>" (it ran and failed or timed out); "error: <detail>" (it
+could not be launched — an OSError). A failed seed still starts watch, then marks the stack
+`failed` ("ui seed failed ..."). An `error` outcome starts no watch and fails at once.
+
+Fresh-stack retry: before the first `up` the helper records whether any engine volume carries
+the label `com.docker.compose.project=<stack>` (none = fresh). A failed seed on a fresh stack is
+retried once: status `retrying` (with `retry_started_at`), `compose down -v` (watch has not
+started), the up + ready poll again, the seed again. A stack that is not fresh, or whose volume
+probe could not answer, is never wiped.
 
 JSON shape on disk (rewritten whole on every update; carries no extra keys):
-  {"status": "starting"|"up"|"failed", "stack": ..., "started_at": ...,
+  {"status": "starting"|"retrying"|"up"|"failed", "stack": ..., "started_at": ...,
    "updated_at": ..., "log_path": ...,
+   "retry_started_at": ...   # only when status=retrying
    "ready_at": ...   # only when status=up
    "error": ...}     # only when status=failed
 
@@ -50,6 +65,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -63,6 +80,9 @@ import _stack  # noqa: E402
 from _stack import compose_ps, ready_services  # noqa: E402,F401  (re-exported for importers)
 
 WATCH_SETTLE_S = 5
+SEED_TIMEOUT_S = 240
+SEED_FAILED = ("failed", "error")  # run_ui_seed outcomes that fail a bring-up
+PROJECT_LABEL = "com.docker.compose.project"
 
 
 def expected_services() -> set[str]:
@@ -86,6 +106,8 @@ class Reporter:
             "started_at": self.started_at, "updated_at": now_iso(),
             "log_path": str(self.log_file),
         }
+        if status == "retrying":
+            obj["retry_started_at"] = now_iso()
         if status == "up":
             obj["ready_at"] = now_iso()
         if err:
@@ -122,6 +144,120 @@ def launch_watch(stack: str, cwd: Path, env: dict, log_file: Path) -> subprocess
     logfh = log_file.open("a", encoding="utf-8")
     return subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                             stdout=logfh, stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def is_story_stack(stack: str) -> bool:
+    return stack.startswith(str(wfconfig.get("slots.stack_prefix", "story-")))
+
+
+def run_ui_seed(stack: str, cwd, env: dict, timeout_sec: int = SEED_TIMEOUT_S, emit=None) -> str:
+    """Run `config: stack.seed_cmd` for a story stack. Shared with bring_up_story_stack.py.
+
+    Returns "skipped" (no seed configured, or not a story stack), "absent", "ok",
+    "failed: <detail>" or "error: <detail>" (see the module docstring)."""
+    tpl = str(wfconfig.get("stack.seed_cmd", "") or "").strip()
+    if not tpl or not is_story_stack(stack):
+        return "skipped"
+    cmd = wfconfig.render(tpl, stack=stack, story_id=stack[len(str(wfconfig.get("slots.stack_prefix", "story-"))):])
+    try:
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="replace",
+                              cwd=cwd, env=env, timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        return f"failed: timed out after {timeout_sec} s"
+    except OSError as exc:
+        return f"error: {exc}"
+    output = (proc.stdout or "") + (proc.stderr or "")
+    if emit is not None and output.strip():
+        emit(output.rstrip())
+    absent = str(wfconfig.get("stack.seed_absent_regex", "") or "")
+    if absent and re.search(absent, output):
+        return "absent"
+    if proc.returncode == 0:
+        return "ok"
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+    return f"failed: {lines[-1] if lines else f'exit {proc.returncode}'}"
+
+
+def stack_is_fresh(stack: str, env: dict) -> bool:
+    """True when the engine holds no volume of the stack's compose project. A probe that cannot
+    answer counts as not fresh: only a project proven empty is ever wiped."""
+    try:
+        probe = subprocess.run([*shlex.split(_stack.engine_cmd()), "volume", "ls", "-q", "--filter",
+                                f"label={PROJECT_LABEL}={stack}"],
+                               capture_output=True, text=True, errors="replace", env=env, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0 and not probe.stdout.strip()
+
+
+def bring_up(stack: str, cwd: Path, env: dict, rep: "Reporter", timeout_sec: int) -> None:
+    """`compose up -d --build`, then the ready poll; fails the run on an exited service or the deadline."""
+    expected = expected_services()
+    poll_s = int(wfconfig.get("stack.ready_poll_s", 5))
+    up_cmd = _stack.compose_argv(stack, "up", "-d", "--build", with_file=True)
+    rep.log(" ".join(up_cmd))
+    with rep.log_file.open("a", encoding="utf-8") as logfh:
+        up = subprocess.run(up_cmd, stdout=logfh, stderr=subprocess.STDOUT, cwd=cwd, env=env)
+    if up.returncode != 0:
+        rep.log(f"'up' exited {up.returncode} -- proceeding to ps poll (dependency-health race recovery)")
+    deadline = time.monotonic() + timeout_sec
+    nudged = False
+    while True:
+        services = compose_ps(stack, cwd, env)
+        ready = sorted(ready_services(services))
+        exited = [s for s in services if s.get("State") in ("exited", "dead") and s.get("Service") in expected]
+        created = [s for s in services if s.get("State") == "created"]
+        missing = expected - set(ready)
+        if not missing:
+            break
+        if exited:
+            detail = ", ".join(f"{s.get('Service')}={s.get('State')}" for s in exited)
+            rep.fail(f"container(s) exited during bring-up: {detail}")
+        if created and not nudged:
+            rep.log(f"nudging {len(created)} created-but-not-started service(s) with a re-up")
+            with rep.log_file.open("a", encoding="utf-8") as logfh:
+                subprocess.run(_stack.compose_argv(stack, "up", "-d", with_file=True),
+                               stdout=logfh, stderr=subprocess.STDOUT, cwd=cwd, env=env)
+            nudged = True
+            continue
+        if time.monotonic() > deadline:
+            state = ", ".join(f"{s.get('Service')}={s.get('State')}" for s in services)
+            rep.fail(f"stack did not reach all-ready within {timeout_sec}s. State: {state}")
+        rep.log(f"waiting ({len(set(ready) & expected)}/{len(expected)} ready; missing: "
+                f"{', '.join(sorted(missing))})")
+        time.sleep(poll_s)
+    rep.log(f"all {len(expected)} services ready")
+
+
+def seed_with_retry(stack: str, cwd: Path, env: dict, rep: "Reporter", fresh: bool,
+                    timeout_sec: int) -> tuple[str, bool]:
+    """Run the seed; (status-file error or "", launch_error). A failed seed on a fresh stack is
+    retried once on clean volumes; an `error` outcome is never retried."""
+    outcome = run_ui_seed(stack, cwd, env, SEED_TIMEOUT_S, emit=rep.log)
+    rep.log(f"ui seed: {outcome}")
+    if not outcome.startswith(SEED_FAILED):
+        return "", False
+    launch_error = outcome.startswith("error")
+    if not fresh or launch_error:
+        return f"ui seed {outcome}", launch_error
+    first = outcome.removeprefix("failed: ")
+    rep.log("ui seed failed on a fresh stack: wiping it and retrying the bring-up and the seed once")
+    rep.write_status("retrying")
+    rep.log(f"{' '.join(_stack.compose_argv(stack, 'down', '-v'))}")
+    with rep.log_file.open("a", encoding="utf-8") as logfh:
+        wipe = subprocess.run(_stack.compose_argv(stack, "down", "-v"), stdout=logfh,
+                              stderr=subprocess.STDOUT, cwd=cwd, env=env).returncode
+    if wipe != 0:
+        rep.fail(f"ui seed failed: {first}; the wipe before the retry (down -v) exited {wipe}")
+    bring_up(stack, cwd, env, rep, timeout_sec)
+    retry = run_ui_seed(stack, cwd, env, SEED_TIMEOUT_S, emit=rep.log)
+    rep.log(f"ui seed after the wipe: {retry}")
+    if not retry.startswith(SEED_FAILED):
+        return "", False
+    launch_error = retry.startswith("error")
+    second = "the seed could not be launched" if launch_error else "failed again"
+    return (f"ui seed failed on a fresh stack: {first}; {second} after one wipe and retry: "
+            f"{retry.partition(': ')[2]}"), launch_error
 
 
 def main() -> int:
@@ -161,51 +297,15 @@ def main() -> int:
         rep.fail("config: stack.services is empty — readiness cannot be judged; "
                  "list the long-running services that must be running")
     cwd = _stack.compose_dir(worktree)
-    poll_s = int(wfconfig.get("stack.ready_poll_s", 5))
 
     try:
-        up_cmd = _stack.compose_argv(args.stack, "up", "-d", "--build", with_file=True)
-        rep.log(" ".join(up_cmd))
-        with rep.log_file.open("a", encoding="utf-8") as logfh:
-            up = subprocess.run(up_cmd, stdout=logfh, stderr=subprocess.STDOUT, cwd=cwd, env=env)
-        if up.returncode != 0:
-            rep.log(f"'up' exited {up.returncode} -- proceeding to ps poll (dependency-health race recovery)")
-
-        deadline = time.monotonic() + args.stack_timeout_sec
-        nudged = False
-        while True:
-            services = compose_ps(args.stack, cwd, env)
-            ready = sorted(ready_services(services))
-            exited = [s for s in services
-                      if s.get("State") in ("exited", "dead")
-                      and s.get("Service") in expected]
-            created = [s for s in services if s.get("State") == "created"]
-
-            missing = expected - set(ready)
-            if not missing:
-                break
-
-            if exited:
-                detail = ", ".join(f"{s.get('Service')}={s.get('State')}" for s in exited)
-                rep.fail(f"container(s) exited during bring-up: {detail}")
-
-            if created and not nudged:
-                rep.log(f"nudging {len(created)} created-but-not-started service(s) with a re-up")
-                with rep.log_file.open("a", encoding="utf-8") as logfh:
-                    subprocess.run(_stack.compose_argv(args.stack, "up", "-d", with_file=True),
-                                   stdout=logfh, stderr=subprocess.STDOUT, cwd=cwd, env=env)
-                nudged = True
-                continue
-
-            if time.monotonic() > deadline:
-                state = ", ".join(f"{s.get('Service')}={s.get('State')}" for s in services)
-                rep.fail(f"stack did not reach all-ready within {args.stack_timeout_sec}s. State: {state}")
-
-            rep.log(f"waiting ({len(set(ready) & expected)}/{len(expected)} ready; missing: "
-                    f"{', '.join(sorted(missing))})")
-            time.sleep(poll_s)
-
-        rep.log(f"all {len(expected)} services ready")
+        fresh = stack_is_fresh(args.stack, env)
+        rep.log("stack is fresh: no engine volume of its compose project exists" if fresh
+                else "stack is not fresh (or the volume probe could not answer): it is never wiped")
+        bring_up(args.stack, cwd, env, rep, args.stack_timeout_sec)
+        seed_error, launch_error = seed_with_retry(args.stack, cwd, env, rep, fresh, args.stack_timeout_sec)
+        if launch_error:
+            rep.fail(seed_error)
 
         if wfconfig.get("stack.watch", True):
             rep.log("starting compose watch (detached)")
@@ -219,6 +319,8 @@ def main() -> int:
         else:
             rep.log("SKIPPED: compose watch — config: stack.watch = false")
 
+        if seed_error:
+            rep.fail(seed_error)
         rep.write_status("up")
         rep.log("bring-up complete -- stack ready")
         return 0

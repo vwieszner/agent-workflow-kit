@@ -1,0 +1,13 @@
+{
+  "name": "agent-workflow-kit",
+  "version": "0.2.0",
+  "description": "Spec-driven, human-gated development workflow: isolated story slots, tests-first implementation, layered review, guarded merges, an autonomous loop and a learning loop.",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "code-review",
+    "agents",
+    "tdd",
+    "git-worktree"
+  ]
+}

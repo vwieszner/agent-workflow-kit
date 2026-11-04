@@ -41,7 +41,8 @@ Pick by situation:
 - **Hung RIGHT NOW → attach a stack sampler to the live PID.** Find the PID inside the container
   (`<compose> -p <stack> exec -T <service> ps aux`), then dump all threads without restarting:
   Python `py-spy dump --pid <PID> --locals`; JVM `jstack <PID>`; Go `kill -QUIT <PID>`; Node
-  `kill -USR1 <PID>` + inspector. In a container, ptrace-based samplers need the `SYS_PTRACE`
+  `kill -USR1 <PID>` + inspector — each run inside the container (`<compose> -p <stack> exec -T
+  <service> ...`): a host-side `kill` is denied by the process-kill guard. In a container, ptrace-based samplers need the `SYS_PTRACE`
   capability on the service (`cap_add: [SYS_PTRACE]`); the sampler must be installed in the image.
 - **Suspected blocking-sync-in-async → a blocking-call detector.** Make any sync I/O on the event
   loop fail LOUDLY at the call site: Python `blockbuster` scoped to the project's packages, or

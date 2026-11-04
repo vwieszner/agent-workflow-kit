@@ -1,0 +1,30 @@
+
+Running 1 test using 1 worker
+×F
+
+  1) [chromium] › tests/repro-r1-10.spec.js:6:1 › a dialog that never settles is reported, not awaited forever 
+
+    Error: expect(received).not.toBe(expected) // Object.is equality
+
+    Expected: not "still pending after 10s"
+
+      24 |         new Promise((resolve) => setTimeout(() => resolve('still pending after 10s'), 10000)),
+      25 |     ]);
+    > 26 |     expect(outcome).not.toBe('still pending after 10s');
+         |                         ^
+      27 | });
+      28 |
+        at /srv/web/tests/repro-r1-10.spec.js:26:25
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────
+    test-results/repro-r1-10-a-dialog-that-n-9e8f7-not-awaited-forever-chromium/test-failed-1.png
+    ───────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests/repro-r1-10.spec.js:6:1 › a dialog that never settles is reported, not awaited forever 
+
+[WebServer] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

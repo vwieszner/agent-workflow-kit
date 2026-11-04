@@ -5,7 +5,7 @@
 """Per-turn session journal hook (NO LLM) — capture stage of the curation loop.
 
 Wiring
-    Claude Code: `Stop` and `SubagentStop` hooks.
+    Claude Code: `Stop`, `SubagentStart` and `SubagentStop` hooks.
     OpenCode:    the workflow-hooks plugin calls it on `session.idle` with a
                  `workflow_tool_calls` payload.
 
@@ -15,6 +15,10 @@ Accepted payloads (JSON on stdin)
        (`agent_transcript_path`) is read when present, else `transcript_path`. The hook reads
        the transcript DELTA since a stored byte cursor (.workflow/state/journal/cursors/) —
        O(delta) per turn.
+       SubagentStop reads only the subagent's own transcript (`agent_transcript_path`), so the
+       spawns and commands of nested and workflow-spawned agents reach the journal; it fires with
+       an empty `agent_type` when no agent ran (skipped) and can fire several times per agent
+       (the per-transcript cursor makes repeats no-ops).
     2. Plugin payload: `session_id` (the PARENT session for a subagent), optional `agent_id`,
        `workflow_tool_calls: [{"tool": str, "input": str|object, "ok": bool}, ...]`
        already summarized by the OpenCode plugin, `workflow_user_messages: [str, ...]` and
@@ -30,17 +34,28 @@ Output (DESIGN §8): one JSON line per turn appended to
      "facts": [{"kind": script_written|script_edited|command_run|skill_invoked|
                 agent_spawned|tool_error|interrupted|user_message, ...}]}
 `facts` is derived from the tool calls plus user messages and interrupts, and is what the
-retrospective mines.
+retrospective mines. An `agent_spawned` fact carries `story_id` when the dispatch prompt names
+one (`story_id: <id>`); a `workflow_run` fact records a Workflow-tool run. Facts read on a
+SubagentStop carry `caller` (the subagent's agent type).
+
+Agent liveness: SubagentStart appends one entry with a single `agent_started` fact
+(`agent_id`, `agent_type`, `cwd`) to `<session>.sub-<agent>.jsonl` and reads no transcript — its
+payload carries the PARENT's `transcript_path`, so reading it would file the parent's facts as the
+subagent's. Every SubagentStop with an `agent_type` appends an `agent_stopped` fact to the same
+file, with or without transcript facts; repeats append again. A reader treats an agent as running
+when its latest start/stop fact is a start. Neither kind carries desc/command/path/text/story_id,
+so story-matching journal readers never attribute them.
 
 Contract: always exits 0 and prints nothing — never blocks a turn, never injects context.
 No-op when WORKFLOW_RETRO_RUNNING is set (inside the retrospective's own analyst run) or
-WORKFLOW_HEADLESS is set (inside the pre-compaction handoff writer's headless run).
+WORKFLOW_HEADLESS is set (inside any headless child run the adapters start).
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,6 +76,7 @@ INJECTION_PREFIXES = (
     "<system-reminder>",
     "Call ToolSearch with query",
 )
+STORY_ID = re.compile(r"story[_\s-]?id\s*[:=]\s*[\"'`*]*([A-Za-z0-9][\w.\-]*)", re.IGNORECASE)
 MAX_CMD = 300
 MAX_TEXT = 500
 MAX_ERR = 300
@@ -82,6 +98,13 @@ def _is_script(path) -> bool:
     return isinstance(path, str) and path.lower().endswith(SCRIPT_EXTS)
 
 
+def _unscope(name: str) -> str:
+    """`story-impl` for a plugin-scoped `<plugin>:story-impl` (agent_roles.unscope; inlined so a missing
+    scripts dir cannot break the journal)."""
+    head, sep, tail = name.partition(":")
+    return tail if sep and head and ":" not in tail and head.replace("-", "").isalnum() else name
+
+
 def _field(inp: dict, *keys: str) -> str:
     for k in keys:
         v = inp.get(k)
@@ -97,8 +120,12 @@ def _normalize(tool: str, inp) -> dict:
         detail["path"] = _field(inp, "file_path", "filePath", "path")
         detail["command"] = _field(inp, "command", "cmd")
         detail["skill"] = _field(inp, "skill", "name")
-        detail["agent_type"] = _field(inp, "subagent_type", "agent", "subagentType")
+        detail["agent_type"] = _unscope(_field(inp, "subagent_type", "agent", "subagentType"))
         detail["desc"] = _field(inp, "description")
+        detail["prompt"] = _field(inp, "prompt")
+        if tool == "Workflow":
+            detail["workflow"] = _field(inp, "name", "scriptPath") or "?"
+            detail["args"] = json.dumps(inp.get("args"), ensure_ascii=False, default=str)
     else:
         text = str(inp or "")
         if tool in CMD_TOOLS:
@@ -112,6 +139,7 @@ def _normalize(tool: str, inp) -> dict:
             head, sep, rest = text.partition(":")
             detail["agent_type"] = head.strip()
             detail["desc"] = rest.strip() if sep else text
+            detail["prompt"] = text
         detail["raw"] = text
 
     if tool in CMD_TOOLS:
@@ -144,8 +172,15 @@ def _facts_from_call(call: dict, ts) -> list:
     elif tool == "Skill":
         facts.append({"ts": ts, "kind": "skill_invoked", "skill": d.get("skill")})
     elif tool == "Agent":
-        facts.append({"ts": ts, "kind": "agent_spawned", "agent_type": d.get("agent_type"),
-                      "desc": d.get("desc", "")[:MAX_TEXT]})
+        fact = {"ts": ts, "kind": "agent_spawned", "agent_type": d.get("agent_type"),
+                "desc": d.get("desc", "")[:MAX_TEXT]}
+        m = STORY_ID.search(d.get("prompt", ""))
+        if m:
+            fact["story_id"] = m.group(1).rstrip(".,;:\"'`*")
+        facts.append(fact)
+    elif tool == "Workflow":
+        facts.append({"ts": ts, "kind": "workflow_run", "workflow": d.get("workflow", "?"),
+                      "desc": d.get("args", "")[:MAX_TEXT]})
     if not call.get("ok", True):
         facts.append({"ts": ts, "kind": "tool_error", "tool": tool,
                       "snippet": str(call.get("_error", ""))[:MAX_ERR]})
@@ -304,12 +339,17 @@ def main() -> int:
         payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict):
             return 0
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
+        try:
+            from agent_roles import normalize_payload
+            normalize_payload(payload)
+        except ImportError:
+            pass
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import _curation_state as cs
 
         session_id = str(payload.get("session_id") or "unknown-session")
         agent_id = payload.get("agent_id")
-
         tool_calls = payload.get("workflow_tool_calls")
         if isinstance(tool_calls, list):
             calls, facts = _from_plugin(tool_calls, payload.get("workflow_user_messages"),
@@ -317,17 +357,44 @@ def main() -> int:
             _append(cs, session_id, agent_id, "plugin", calls, facts)
             return 0
 
+        event = payload.get("hook_event_name")
+        if event == "SubagentStart":
+            if payload.get("agent_type") and agent_id:
+                _append(cs, session_id, agent_id, "hook", [], [
+                    {"ts": _now(), "kind": "agent_started", "agent_id": agent_id,
+                     "agent_type": payload.get("agent_type"), "cwd": payload.get("cwd")}])
+            return 0
+        stopped = None
+        if event == "SubagentStop":
+            if not payload.get("agent_type"):
+                return 0
+            if agent_id:
+                stopped = {"ts": _now(), "kind": "agent_stopped", "agent_id": agent_id,
+                           "agent_type": payload.get("agent_type")}
+
         transcript_path = payload.get("transcript_path")
         agent_transcript = payload.get("agent_transcript_path")
-        if agent_id and agent_transcript and os.path.isfile(agent_transcript):
+        if event == "SubagentStop":
+            transcript_path = agent_transcript  # never the parent's transcript
+        elif agent_id and agent_transcript and os.path.isfile(agent_transcript):
             transcript_path = agent_transcript
-        if not transcript_path or not os.path.isfile(transcript_path):
-            return 0
-        delta = _read_delta(cs, transcript_path)
+        delta = None
+        if transcript_path and os.path.isfile(transcript_path):
+            try:
+                delta = _read_delta(cs, transcript_path)
+            except OSError:
+                delta = None
         if delta is None:
+            if stopped:
+                _append(cs, session_id, agent_id, "hook", [], [stopped])
             return 0
         parsed, cur_path, new_cursor = delta
         calls, facts = _from_transcript_lines(parsed)
+        if facts and event == "SubagentStop":
+            for fact in facts:
+                fact["caller"] = payload.get("agent_type")
+        if stopped:
+            facts.append(stopped)
         if _append(cs, session_id, agent_id, "transcript", calls, facts):
             _write_cursor(cur_path, new_cursor)  # only advance once persisted
     except Exception:  # noqa: BLE001 — a journal hook must never break a turn

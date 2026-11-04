@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""Per-turn session journal hook (NO LLM) — capture stage of the curation loop.
+
+Wiring
+    Claude Code: `Stop`, `SubagentStart` and `SubagentStop` hooks.
+    OpenCode:    the workflow-hooks plugin calls it on `session.idle` with a
+                 `workflow_tool_calls` payload.
+
+Accepted payloads (JSON on stdin)
+    1. Claude Code Stop/SubagentStop payload: `session_id`, `transcript_path`, optional
+       `agent_id` and `agent_transcript_path`. With `agent_id`, the subagent's own transcript
+       (`agent_transcript_path`) is read when present, else `transcript_path`. The hook reads
+       the transcript DELTA since a stored byte cursor (.workflow/state/journal/cursors/) —
+       O(delta) per turn.
+       SubagentStop reads only the subagent's own transcript (`agent_transcript_path`), so the
+       spawns and commands of nested and workflow-spawned agents reach the journal; it fires with
+       an empty `agent_type` when no agent ran (skipped) and can fire several times per agent
+       (the per-transcript cursor makes repeats no-ops).
+    2. Plugin payload: `session_id` (the PARENT session for a subagent), optional `agent_id`,
+       `workflow_tool_calls: [{"tool": str, "input": str|object, "ok": bool}, ...]`
+       already summarized by the OpenCode plugin, `workflow_user_messages: [str, ...]` and
+       `workflow_interrupted: bool`. Tool names may be OpenCode-native (`bash`, `write`,
+       `task`, ...) or Claude-shaped (`Bash`, `Write`, `Agent`, ...).
+       When `workflow_tool_calls` is present it wins; `transcript_path` is ignored.
+
+Output (DESIGN §8): one JSON line per turn appended to
+    .workflow/state/journal/<session_id>.jsonl              (main session)
+    .workflow/state/journal/<session_id>.sub-<agent>.jsonl  (subagent)
+    {"ts", "session_id", "source", ["agent_id"],
+     "tool_calls": [{"tool", "input", "ok"}],
+     "facts": [{"kind": script_written|script_edited|command_run|skill_invoked|
+                agent_spawned|tool_error|interrupted|user_message, ...}]}
+`facts` is derived from the tool calls plus user messages and interrupts, and is what the
+retrospective mines. An `agent_spawned` fact carries `story_id` when the dispatch prompt names
+one (`story_id: <id>`); a `workflow_run` fact records a Workflow-tool run. Facts read on a
+SubagentStop carry `caller` (the subagent's agent type).
+
+Agent liveness: SubagentStart appends one entry with a single `agent_started` fact
+(`agent_id`, `agent_type`, `cwd`) to `<session>.sub-<agent>.jsonl` and reads no transcript — its
+payload carries the PARENT's `transcript_path`, so reading it would file the parent's facts as the
+subagent's. Every SubagentStop with an `agent_type` appends an `agent_stopped` fact to the same
+file, with or without transcript facts; repeats append again. A reader treats an agent as running
+when its latest start/stop fact is a start. Neither kind carries desc/command/path/text/story_id,
+so story-matching journal readers never attribute them.
+
+Contract: always exits 0 and prints nothing — never blocks a turn, never injects context.
+No-op when WORKFLOW_RETRO_RUNNING is set (inside the retrospective's own analyst run) or
+WORKFLOW_HEADLESS is set (inside any headless child run the adapters start).
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCRIPT_EXTS = (".py", ".ps1", ".sh", ".bat")
+CMD_TOOLS = {"Bash", "PowerShell"}
+# OpenCode-native tool names → canonical (Claude-shaped) names.
+TOOL_ALIASES = {
+    "bash": "Bash", "shell": "Bash", "powershell": "PowerShell",
+    "write": "Write", "edit": "Edit", "multiedit": "MultiEdit", "patch": "Edit",
+    "task": "Agent", "agent": "Agent", "skill": "Skill",
+    "read": "Read", "grep": "Grep", "glob": "Glob", "list": "LS",
+    "webfetch": "WebFetch", "websearch": "WebSearch", "todowrite": "TodoWrite",
+}
+# User-message prefixes that are hook/system injections, not real user input.
+INJECTION_PREFIXES = (
+    "<command-message>",
+    "<system-reminder>",
+    "Call ToolSearch with query",
+)
+STORY_ID = re.compile(r"story[_\s-]?id\s*[:=]\s*[\"'`*]*([A-Za-z0-9][\w.\-]*)", re.IGNORECASE)
+MAX_CMD = 300
+MAX_TEXT = 500
+MAX_ERR = 300
+MAX_INPUT = 200
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _canon_tool(name) -> str:
+    name = str(name or "?")
+    if name.startswith("mcp__"):
+        return name
+    return TOOL_ALIASES.get(name, TOOL_ALIASES.get(name.lower(), name))
+
+
+def _is_script(path) -> bool:
+    return isinstance(path, str) and path.lower().endswith(SCRIPT_EXTS)
+
+
+def _unscope(name: str) -> str:
+    """`story-impl` for a plugin-scoped `<plugin>:story-impl` (agent_roles.unscope; inlined so a missing
+    scripts dir cannot break the journal)."""
+    head, sep, tail = name.partition(":")
+    return tail if sep and head and ":" not in tail and head.replace("-", "").isalnum() else name
+
+
+def _field(inp: dict, *keys: str) -> str:
+    for k in keys:
+        v = inp.get(k)
+        if v:
+            return str(v)
+    return ""
+
+
+def _normalize(tool: str, inp) -> dict:
+    """→ {"tool", "input" (short summary), "ok", "_detail" (fields for fact derivation)}."""
+    detail: dict = {}
+    if isinstance(inp, dict):
+        detail["path"] = _field(inp, "file_path", "filePath", "path")
+        detail["command"] = _field(inp, "command", "cmd")
+        detail["skill"] = _field(inp, "skill", "name")
+        detail["agent_type"] = _unscope(_field(inp, "subagent_type", "agent", "subagentType"))
+        detail["desc"] = _field(inp, "description")
+        detail["prompt"] = _field(inp, "prompt")
+        if tool == "Workflow":
+            detail["workflow"] = _field(inp, "name", "scriptPath") or "?"
+            detail["args"] = json.dumps(inp.get("args"), ensure_ascii=False, default=str)
+    else:
+        text = str(inp or "")
+        if tool in CMD_TOOLS:
+            detail["command"] = text
+        elif tool in ("Write", "Edit", "MultiEdit"):
+            detail["path"] = text
+        elif tool == "Skill":
+            detail["skill"] = text
+        elif tool == "Agent":
+            # Plugin summaries read "<agent>: <description>".
+            head, sep, rest = text.partition(":")
+            detail["agent_type"] = head.strip()
+            detail["desc"] = rest.strip() if sep else text
+            detail["prompt"] = text
+        detail["raw"] = text
+
+    if tool in CMD_TOOLS:
+        summary = detail.get("command", "")
+    elif tool in ("Write", "Edit", "MultiEdit", "Read"):
+        summary = detail.get("path", "") or detail.get("raw", "")
+    elif tool == "Skill":
+        summary = detail.get("skill", "")
+    elif tool == "Agent":
+        summary = f"{detail.get('agent_type', '')}: {detail.get('desc', '')}".strip(": ")
+    elif isinstance(inp, dict):
+        summary = _field(inp, "pattern", "query", "url", "file_path", "filePath", "path") \
+            or json.dumps(inp, ensure_ascii=False, default=str)
+    else:
+        summary = detail.get("raw", "")
+    cap = MAX_CMD if tool in CMD_TOOLS else MAX_INPUT
+    return {"tool": tool, "input": str(summary)[:cap], "ok": True, "_detail": detail}
+
+
+def _facts_from_call(call: dict, ts) -> list:
+    tool, d = call["tool"], call.get("_detail", {})
+    facts = []
+    if tool == "Write" and _is_script(d.get("path")):
+        facts.append({"ts": ts, "kind": "script_written", "path": d["path"]})
+    elif tool in ("Edit", "MultiEdit") and _is_script(d.get("path")):
+        facts.append({"ts": ts, "kind": "script_edited", "path": d["path"]})
+    elif tool in CMD_TOOLS:
+        facts.append({"ts": ts, "kind": "command_run", "tool": tool,
+                      "command": d.get("command", "")[:MAX_CMD]})
+    elif tool == "Skill":
+        facts.append({"ts": ts, "kind": "skill_invoked", "skill": d.get("skill")})
+    elif tool == "Agent":
+        fact = {"ts": ts, "kind": "agent_spawned", "agent_type": d.get("agent_type"),
+                "desc": d.get("desc", "")[:MAX_TEXT]}
+        m = STORY_ID.search(d.get("prompt", ""))
+        if m:
+            fact["story_id"] = m.group(1).rstrip(".,;:\"'`*")
+        facts.append(fact)
+    elif tool == "Workflow":
+        facts.append({"ts": ts, "kind": "workflow_run", "workflow": d.get("workflow", "?"),
+                      "desc": d.get("args", "")[:MAX_TEXT]})
+    if not call.get("ok", True):
+        facts.append({"ts": ts, "kind": "tool_error", "tool": tool,
+                      "snippet": str(call.get("_error", ""))[:MAX_ERR]})
+    return facts
+
+
+# --------------------------------------------------------------------------- plugin payload
+
+def _user_text_ok(text: str) -> bool:
+    return bool(text) and not text.startswith(INJECTION_PREFIXES) and '"hook_event_name"' not in text
+
+
+def _from_plugin(raw_calls: list, user_messages=None, interrupted=False) -> tuple[list, list]:
+    calls, facts = [], []
+    ts = _now()
+    for text in user_messages if isinstance(user_messages, list) else []:
+        text = str(text or "").strip()
+        if _user_text_ok(text):
+            facts.append({"ts": ts, "kind": "user_message", "text": text[:MAX_TEXT]})
+    for item in raw_calls:
+        if not isinstance(item, dict):
+            continue
+        tool = _canon_tool(item.get("tool"))
+        call = _normalize(tool, item.get("input"))
+        call["ok"] = bool(item.get("ok", True))
+        if item.get("error"):
+            call["_error"] = item.get("error")
+        calls.append(call)
+        facts.extend(_facts_from_call(call, ts))
+    if interrupted:
+        facts.append({"ts": ts, "kind": "interrupted"})
+    return calls, facts
+
+
+# --------------------------------------------------------------------------- transcript payload
+
+def _cursor_path(cdir: Path, transcript_path: str) -> Path:
+    key = hashlib.sha1(transcript_path.encode("utf-8")).hexdigest()[:16]
+    return cdir / f"{key}.cur"
+
+
+def _read_cursor(p: Path) -> int:
+    try:
+        return int(p.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_cursor(p: Path, value: int) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(str(value), encoding="utf-8")
+
+
+def _from_transcript_lines(lines: list) -> tuple[list, list]:
+    calls: list = []
+    extra: list = []           # user_message / interrupted / orphan tool_error facts
+    by_id: dict = {}           # tool_use id → call
+    ts_of: dict = {}           # id(call) → transcript timestamp
+    for obj in lines:
+        ts = obj.get("timestamp")
+        t = obj.get("type")
+        content = (obj.get("message") or {}).get("content")
+        if t == "assistant" and isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                call = _normalize(_canon_tool(block.get("name")), block.get("input") or {})
+                calls.append(call)
+                ts_of[id(call)] = ts
+                if block.get("id"):
+                    by_id[block["id"]] = call
+        elif t == "user":
+            if isinstance(content, str):
+                text = content.strip()
+                if _user_text_ok(text):
+                    extra.append({"ts": ts, "kind": "user_message", "text": text[:MAX_TEXT]})
+            elif isinstance(content, list):
+                for block in content:
+                    if not (isinstance(block, dict) and block.get("type") == "tool_result"
+                            and block.get("is_error")):
+                        continue
+                    snippet = block.get("content")
+                    if isinstance(snippet, list):
+                        snippet = " ".join(str(b.get("text", b)) for b in snippet
+                                           if isinstance(b, dict)) or str(snippet)
+                    call = by_id.get(block.get("tool_use_id"))
+                    if call is not None:
+                        call["ok"] = False
+                        call["_error"] = snippet
+                    else:  # tool_use was in an earlier delta
+                        extra.append({"ts": ts, "kind": "tool_error", "tool": "?",
+                                      "snippet": str(snippet)[:MAX_ERR]})
+            tur = obj.get("toolUseResult")
+            if isinstance(tur, dict) and tur.get("interrupted"):
+                extra.append({"ts": ts, "kind": "interrupted"})
+    facts: list = []
+    for call in calls:
+        facts.extend(_facts_from_call(call, ts_of.get(id(call))))
+    return calls, facts + extra
+
+
+def _read_delta(cs, transcript_path: str):
+    """→ (parsed lines, cursor file, new cursor) or None when there is nothing complete."""
+    cur_path = _cursor_path(cs.cursors_dir(), transcript_path)
+    cursor = _read_cursor(cur_path)
+    size = os.path.getsize(transcript_path)
+    if cursor > size:  # transcript rotated / truncated
+        cursor = 0
+    with open(transcript_path, "rb") as fh:
+        fh.seek(cursor)
+        data = fh.read()
+    last_nl = data.rfind(b"\n")
+    if last_nl == -1:
+        return None
+    complete = data[: last_nl + 1]
+    parsed = []
+    for line in complete.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            parsed.append(obj)
+    return parsed, cur_path, cursor + len(complete)
+
+
+# --------------------------------------------------------------------------- main
+
+def _append(cs, session_id: str, agent_id, source: str, calls: list, facts: list) -> bool:
+    if not calls and not facts:
+        return True
+    jdir = cs.journal_dir()
+    jdir.mkdir(parents=True, exist_ok=True)
+    suffix = f".sub-{cs.safe_name(agent_id)}" if agent_id else ""
+    entry = {"ts": _now(), "session_id": session_id, "source": source}
+    if agent_id:
+        entry["agent_id"] = agent_id
+    entry["tool_calls"] = [{"tool": c["tool"], "input": c["input"], "ok": c["ok"]} for c in calls]
+    entry["facts"] = facts
+    try:
+        with open(jdir / f"{cs.safe_name(session_id)}{suffix}.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def main() -> int:
+    if os.environ.get("WORKFLOW_RETRO_RUNNING") or os.environ.get("WORKFLOW_HEADLESS"):
+        return 0
+    try:
+        raw = sys.stdin.buffer.read().lstrip(b"\xef\xbb\xbf")
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict):
+            return 0
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
+        try:
+            from agent_roles import normalize_payload
+            normalize_payload(payload)
+        except ImportError:
+            pass
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import _curation_state as cs
+
+        session_id = str(payload.get("session_id") or "unknown-session")
+        agent_id = payload.get("agent_id")
+        tool_calls = payload.get("workflow_tool_calls")
+        if isinstance(tool_calls, list):
+            calls, facts = _from_plugin(tool_calls, payload.get("workflow_user_messages"),
+                                        bool(payload.get("workflow_interrupted")))
+            _append(cs, session_id, agent_id, "plugin", calls, facts)
+            return 0
+
+        event = payload.get("hook_event_name")
+        if event == "SubagentStart":
+            if payload.get("agent_type") and agent_id:
+                _append(cs, session_id, agent_id, "hook", [], [
+                    {"ts": _now(), "kind": "agent_started", "agent_id": agent_id,
+                     "agent_type": payload.get("agent_type"), "cwd": payload.get("cwd")}])
+            return 0
+        stopped = None
+        if event == "SubagentStop":
+            if not payload.get("agent_type"):
+                return 0
+            if agent_id:
+                stopped = {"ts": _now(), "kind": "agent_stopped", "agent_id": agent_id,
+                           "agent_type": payload.get("agent_type")}
+
+        transcript_path = payload.get("transcript_path")
+        agent_transcript = payload.get("agent_transcript_path")
+        if event == "SubagentStop":
+            transcript_path = agent_transcript  # never the parent's transcript
+        elif agent_id and agent_transcript and os.path.isfile(agent_transcript):
+            transcript_path = agent_transcript
+        delta = None
+        if transcript_path and os.path.isfile(transcript_path):
+            try:
+                delta = _read_delta(cs, transcript_path)
+            except OSError:
+                delta = None
+        if delta is None:
+            if stopped:
+                _append(cs, session_id, agent_id, "hook", [], [stopped])
+            return 0
+        parsed, cur_path, new_cursor = delta
+        calls, facts = _from_transcript_lines(parsed)
+        if facts and event == "SubagentStop":
+            for fact in facts:
+                fact["caller"] = payload.get("agent_type")
+        if stopped:
+            facts.append(stopped)
+        if _append(cs, session_id, agent_id, "transcript", calls, facts):
+            _write_cursor(cur_path, new_cursor)  # only advance once persisted
+    except Exception:  # noqa: BLE001 — a journal hook must never break a turn
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

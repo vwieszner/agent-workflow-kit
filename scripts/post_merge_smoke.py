@@ -127,7 +127,8 @@ def source_sync_gate(project: str, repo: Path) -> tuple[bool, list[str]]:
 
 
 def main() -> int:
-    sys.stdout.reconfigure(line_buffering=True)  # pyright: ignore[reportAttributeAccessIssue] — keep output live when piped
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)  # pyright: ignore[reportAttributeAccessIssue] — keep output live when piped
     if not wfconfig.stack_enabled():
         _stack.skipped("post-merge smoke", _stack.STACK_NONE_REASON)
         return 0
@@ -150,12 +151,34 @@ def main() -> int:
             "ports_env": _stack.ports_env_prefix(slot)}
 
     # ---------------------------------------------------------- service state
-    ps = run(_stack.compose_argv(project, "ps", "--format", "json"))
+    # `-a`: without it an exited container is absent from the listing, so a stopped stack reads
+    # as `missing` and is indistinguishable from a service that was never created.
+    ps = run(_stack.compose_argv(project, "ps", "-a", "--format", "json"))
     if ps.returncode != 0:
         print(f"FAIL: compose ps exited {ps.returncode}")
         print("  Likely cause: the container engine is not running. Start it and re-try.")
         return 1
-    state = {s.get("Service"): s.get("State") for s in _stack.parse_ps_json(ps.stdout)}
+    rows = _stack.parse_ps_json(ps.stdout)
+    state = {s.get("Service"): s.get("State") for s in rows}
+    status = {s.get("Service"): s.get("Status") for s in rows}
+
+    # ------------------------------------------------------------ stopped stack
+    # Every service down at once is an engine or host restart, not the merge: the sync gate and
+    # the log diagnoses below would only report its consequences.
+    if all(state.get(s) != "running" for s in services):
+        print(f"smoke FAIL: the shared stack {project} is stopped — none of its {len(services)} "
+              f"services is running")
+        for s in services:
+            print(f"  {s:<12} {status.get(s) or 'no container'}")
+        print()
+        print("[Diagnosis S] The shared stack is stopped (an engine or host restart leaves it down; "
+              "the merge is not the cause)")
+        print(f"  Fix:        uv run --no-project .workflow/scripts/start_slot0.py")
+        if wfconfig.get("stack.watch", True):
+            print(f"              then, in the background: uv run --no-project .workflow/scripts/"
+                  f"bring_up_story_stack.py --slot {slot} --project-name {project} --worktree {repo} --mode watch")
+        print("              then re-run this smoke: its source-sync gate proves the merged code is in.")
+        return 1
 
     # ---------------------------------------------------------------- log tails
     logs = {svc: compose_logs(project, svc, tail_n, since) for svc in services}

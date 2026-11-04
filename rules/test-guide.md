@@ -11,13 +11,15 @@ When `config: env.app_runs_in_container` is true, every test command runs in the
 ## 1. Entry points
 | Purpose | Command |
 |---|---|
-| Scoped iteration / agent validation loop | `uv run --no-project .workflow/scripts/run_scoped_tests.py --project-name <stack> <labels...>` — verdict, exit code, full failing-id list and capped tails reach the context; the raw log goes to a temp file |
+| Scoped iteration / agent validation loop | `uv run --no-project .workflow/scripts/run_scoped_tests.py --story-id <id> <labels...> [--leg <name>=<value>]... [--scripts]` — per leg: verdict, exit code, full failing-id list and capped detail reach the context; the raw log goes to `.workflow/state/logs/scoped/`. `--record <id> <phase>` makes a green run append its own GREEN line (`rules-test-runs`) |
 | Full gate (all legs: backend + unit + e2e) | `uv run --no-project .workflow/scripts/run_full_suite.py` (shared stack) or `... --story-id <id>` (isolated stack) |
 
 - The full gate owns preflight, slot resolution and output parsing — do not run preflight separately
   ahead of it. Any one leg failing fails the gate.
-- **Concurrent full-gate invocations queue** on a host-global lock (announced periodically). Exhausting
-  the lock timeout (`config: tests.full_lock_timeout_min`) FAILS the run; it never proceeds unlocked.
+- **Concurrent full-gate invocations on one stack queue** on that stack's lock (`config: tests.gate_lock_scope`; announced
+  periodically, served first-come-first-served); gates on different stacks run concurrently.
+  Exhausting the lock timeout (`config: tests.full_lock_timeout_min`) FAILS the run; it never
+  proceeds unlocked.
 - Scoped runs are NOT covered by the gate's preflight: run
   `uv run --no-project .workflow/scripts/stack_preflight.py --project-name <stack> --worktree <worktree-root>`
   yourself first — the worktree root, never its `config: stack.health.worktree_src` subfolder (the
@@ -29,6 +31,8 @@ When `config: env.app_runs_in_container` is true, every test command runs in the
 - Every test invocation MUST carry every flag in `config: tests_policy.required_flags` (typically: a
   non-interactive flag so setup prompts cannot hang the runner, and the test settings/profile so the
   run cannot reach live brokers, queues or databases). Wrappers may not add them for you — check.
+- `run_scoped_tests.py` and `run_full_suite.py` refuse (exit 2, CONFIG-ERROR) a rendered command that
+  lacks a required flag; a hand-run command has no such check.
 - E2E runners run in CI/non-interactive mode so the HTML reporter does not start a server and hang
   the process, with runner retries disabled (e.g. `--retries=0`) — a retry turns a failure into a pass. Never try to open an HTML report from the CLI — tell the owner its path.
 - A wrong test label may not error clearly (some runners report a synthetic 1-test failure). Before

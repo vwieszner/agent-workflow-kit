@@ -17,9 +17,15 @@ Layout (all under .workflow/state/, git-ignored):
     proposals/<kind>-<slug>.draft.<ext>    its draft artifact
     proposals/archive/                     resolved proposals
     curation-learnings.md                  rejection reasons (never re-propose)
+    retro-launches.jsonl                   one line per finished background analyst run:
+                                           {"run_id", "session", "facts", "started", "ended",
+                                            "tool", "ok", "error", "denials", "exit_code",
+                                            "subtype", "total_cost_usd", "duration_ms",
+                                            "analyst_session"}
 
 A session is "unmined" when its meaningful-fact count exceeds
-max(analyzed_facts, launched_facts) by at least the caller's threshold.
+max(analyzed_facts, launched_facts) by at least the caller's threshold. A failed analyst run
+resets launched_facts, so its session counts as unmined again.
 """
 from __future__ import annotations
 
@@ -69,6 +75,34 @@ def learnings_path() -> Path:
     return _state("curation-learnings.md")
 
 
+def launches_path() -> Path:
+    # Outside journal/: every *.jsonl there is read as a session journal.
+    return _state("retro-launches.jsonl")
+
+
+def append_launch(record: dict) -> None:
+    p = launches_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\n")
+
+
+def last_launch():
+    """The newest analyst run record, or None."""
+    try:
+        lines = launches_path().read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            return rec
+    return None
+
+
 def proposal_kinds() -> tuple:
     kinds = wfconfig.get("curation.proposal_kinds", list(DEFAULT_KINDS)) or list(DEFAULT_KINDS)
     return tuple(str(k).lower() for k in kinds)
@@ -115,6 +149,38 @@ def session_fact_count(session_id: str) -> int:
         except OSError:
             continue
     return total
+
+
+def new_facts(session_id: str, covered: int) -> list:
+    """The session's meaningful facts after the first `covered`, oldest first by `ts`, each tagged
+    with `_journal` (its journal file's name).
+
+    Facts are appended as they happen, so the first `covered` facts by ts are the ones the marker
+    already counted when a --mark or a launch set it.
+    """
+    facts = []
+    for jf in session_journals(session_id):
+        try:
+            with open(jf, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    for fact in _line_facts(obj):
+                        if isinstance(fact, dict) and fact.get("kind") in MEANINGFUL:
+                            fact = dict(fact)
+                            fact["_journal"] = jf.name
+                            facts.append(fact)
+        except OSError:
+            continue
+    facts.sort(key=lambda fact: str(fact.get("ts") or ""))
+    return facts[covered:]
 
 
 def all_session_ids() -> list:
@@ -209,3 +275,42 @@ def pending_proposals() -> list:
 def proposal_drafts(proposal: Path) -> list:
     """Draft files belonging to a proposal: `<stem>.draft.*` siblings."""
     return sorted(proposal.parent.glob(f"{proposal.stem}.draft.*"))
+
+
+def proposal_heading(proposal: Path) -> tuple:
+    """(kind, title) from a proposal file's frontmatter; "?" for a missing field."""
+    meta = {}
+    try:
+        text = proposal.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    if text.startswith("---"):
+        for line in text.split("\n---", 1)[0].splitlines()[1:]:
+            key, sep, value = line.partition(":")
+            if sep and key.strip() in ("kind", "title", "run_id"):
+                meta[key.strip()] = value.strip().strip('"')
+    return meta.get("kind", "?"), meta.get("title", "?")
+
+
+def proposal_run_id(proposal: Path) -> str:
+    """The `run_id` frontmatter value of a proposal file, or ""."""
+    try:
+        text = proposal.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if not text.startswith("---"):
+        return ""
+    for line in text.split("\n---", 1)[0].splitlines()[1:]:
+        key, sep, value = line.partition(":")
+        if sep and key.strip() == "run_id":
+            return value.strip().strip('"')
+    return ""
+
+
+def archived_proposals() -> list:
+    """Proposal files `curate` resolved (approved or rejected)."""
+    adir = archive_dir()
+    if not adir.is_dir():
+        return []
+    return sorted(p for p in adir.iterdir()
+                  if p.is_file() and p.suffix == ".md" and ".draft." not in p.name)

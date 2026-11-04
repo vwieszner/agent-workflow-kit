@@ -14,9 +14,14 @@ owner approval. Full rule: `.workflow/rules/script-artifact-curation.md`.
    `.workflow/state/proposals/` (not `archive/`, not a `*.draft.*` file, not `README.md`). If none,
    tell the owner the queue is empty and stop.
 
-2. **Present each proposal.** Read the proposal and its `<kind>-<slug>.draft.*` file. Show the
-   owner: kind, title, `target`, the evidence (`recurrence` + the cited journal facts), and a short
-   preview of the draft. Ask the owner for a decision: **Approve / Reject / Skip** (capture a reason
+2. **Present each proposal.** Run `uv run --no-project .workflow/scripts/proposal_drift.py` first;
+   for a target it marks `CHANGED`, `ADDED-SINCE`, `LANDED` or `PATCH-FAILS`, check the draft
+   against the live file before presenting it. Read the proposal and its `<kind>-<slug>.draft.*`
+   file. Show the owner: kind, title, `target`, the evidence (`recurrence` + the cited journal
+   facts), the Impact lines (quality / speed / token cost), and a short preview of the draft. When
+   a proposal has no Impact section, or an axis reads `unmeasured` while the journals or
+   transcripts hold the data, measure it and show the figures first. Present every pending
+   proposal this way before asking for any decision. Ask the owner for a decision: **Approve / Reject / Skip** (capture a reason
    on Reject). When batching several proposals, ask about all of them in one round-trip. A terse
    reply that does not unambiguously identify the option (and the proposal) must be re-confirmed
    before acting.
@@ -59,10 +64,22 @@ owner approval. Full rule: `.workflow/rules/script-artifact-curation.md`.
    other context (a fresh clone, another machine, a teammate), while the registry and catalog
    advertise it.
 
+   Pass each promoted path and each registry/index/catalog file touched: `--add <file>` for a
+   file holding only this run's changes, `--hunks <file> <spec>` (numbers from `list`) for one that
+   also holds other sessions' uncommitted edits — the script registry, `.workflow/AGENTS.local.md`,
+   the rules index and the catalog often do. One shell command; `git commit` with no paths:
+
    ```bash
-   git add <each promoted path> <each registry/index file touched>
-   git diff --cached --numstat        # VERIFY every expected path is listed
+   uv run --no-project .workflow/scripts/stage_own_hunks.py list <file>   # each file other sessions also edited
+   T=$(uv run --no-project .workflow/scripts/stage_own_hunks.py gate --hunks <file> <spec>... --add <file>...) \
+     && git commit -F <msgfile> \
+     && uv run --no-project .workflow/scripts/stage_own_hunks.py verify "$T"
+   git show --stat --format= HEAD     # VERIFY every expected path is listed
    ```
+
+   `gate` exit 3: another session's changes are in the index and nothing was committed; wait and
+   retry, never unstage them. `verify` exit 4: the commit took foreign paths; it lists them; stop
+   and report them to the owner.
 
    Commit with a message naming each artifact, its kind, and the evidence that justified it — the
    rationale belongs in history (`.workflow/state/` is git-ignored, so the archived proposal is
@@ -70,14 +87,16 @@ owner approval. Full rule: `.workflow/rules/script-artifact-curation.md`.
 
    **Three ways files silently drop here:**
    - **`git add` is case-sensitive against the index, even on case-insensitive filesystems.** A
-     file tracked as `skill.md` but presenting as `SKILL.md` stages **nothing** with no error.
-     Always confirm with `git diff --cached --numstat`.
+     file tracked as `skill.md` but presenting as `SKILL.md` stages **nothing** with no error (`gate
+     --add` too). Pass the spelling `git ls-files <dir>` prints, and confirm with
+     `git show --stat --format= HEAD` after the commit.
    - **Tool dirs may be allowlisted** in `.gitignore` (`.claude/*` then `!.claude/skills/<name>/`).
      A newly created skill or agent dir may need its own allowlist line first. Check with
      `git check-ignore -v <path>`.
    - **Memory files outside the repo** are never committed. Skip them deliberately and say so.
 
-   If the owner prefers to commit themselves, print the exact `git add` line and mark the artifact
+   If the owner prefers to commit themselves, print the exact `gate` + `git commit` + `verify`
+   command and mark the artifact
    **unshared until committed** in the report.
 
 7. **Report** what was promoted, rejected, and skipped — **and tracked-vs-untracked per artifact**.

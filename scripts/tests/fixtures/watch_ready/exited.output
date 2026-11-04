@@ -1,0 +1,4 @@
+ Image story-1-1-backend Building
+#1 [internal] load local bake definitions
+#1 DONE 0.0s
+docker compose watch exited with code 17

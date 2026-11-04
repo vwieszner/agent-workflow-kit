@@ -1,0 +1,27 @@
+/* Stylesheet of the localhost control room (scripts/control_room.py). Plain CSS, no build step. */
+body { font-family: system-ui, sans-serif; margin: 0; color: #1d1f23; background: #f6f7f9; }
+nav { display: flex; gap: 1rem; padding: .6rem 1rem; background: #22303f; }
+nav a { color: #d9e2ec; text-decoration: none; }
+nav a.active { color: #fff; font-weight: 600; border-bottom: 2px solid #fff; }
+main { padding: 1rem; max-width: 120rem; }
+h1 { font-size: 1.4rem; margin: 0 0 .75rem; }
+h3, h4 { margin: 1rem 0 .3rem; }
+table { border-collapse: collapse; margin: .4rem 0 1rem; background: #fff; }
+th, td { border: 1px solid #d5d9df; padding: .25rem .5rem; text-align: left; vertical-align: top; font-size: .85rem; }
+th { background: #e8ebef; }
+pre { white-space: pre-wrap; word-break: break-word; margin: .2rem 0; }
+pre.log { max-height: 24rem; overflow: auto; background: #fff; border: 1px solid #d5d9df; padding: .4rem; }
+.doc-head { margin: .4rem 0; padding: .3rem .5rem; background: #eef1f5; border-left: 3px solid #5b7a99; }
+.doc-head .running { color: #8a5a00; }
+.doc-head .unread, .empty { color: #5c6570; font-style: italic; }
+.banner { margin-top: .3rem; padding: .3rem .5rem; background: #fdecea; border: 1px solid #e0a39c; color: #7a1d12; }
+.marker { padding: 0 .35rem; border-radius: .6rem; background: #fff2cc; border: 1px solid #d9b95b; font-size: .75rem; }
+.result { margin: .4rem 0; padding: .4rem .6rem; border: 1px solid #c6ccd3; background: #fff; }
+.result.ok { border-color: #7fb28a; background: #eaf6ec; }
+.result.refused, .result.error { border-color: #e0a39c; background: #fdecea; }
+.computing { color: #8a5a00; }
+form.inline { display: inline-block; margin: 0 .3rem 0 0; }
+form.start-run .field { margin: .25rem 0; }
+form.start-run .hint { color: #5c6570; font-size: .8rem; }
+.start-bar { margin-bottom: .6rem; }
+button { cursor: pointer; }

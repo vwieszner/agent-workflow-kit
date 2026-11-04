@@ -23,6 +23,11 @@ Rules (exit 2 + stderr on any match):
   5. git push / commit rules and destructive commands — same as the Bash guard.
   6. Bare host `python` — same as the Bash guard.
   7. Project rules (`config: guards.command_deny`): [{pattern, reason}].
+  8. `git commit` (incl. `git -C <path> commit`; never `commit-tree`) when
+     `config: guards.commit_via_bash` is true (default): commit-review hooks are bound to the
+     Bash tool, so a PowerShell commit skips them. Here-string bodies are blanked first
+     (text piped to a program is not a commit) unless a shell or evaluator runs the body
+     (`'@ | iex`, `iex @'`, `'@ | pwsh -`) or an `@"` body holds a `$(...)` subexpression.
 """
 from __future__ import annotations
 
@@ -65,6 +70,10 @@ def evaluate(payload: dict) -> int:
     violations += g.recursive_delete_violations(cmd, str(payload.get("cwd") or os.getcwd()),
                                                 powershell=True)
     violations += g.command_deny_violations(cmd)
+    if g.cfg("guards.commit_via_bash", True) and g.GIT_COMMIT.search(g.blank_here_string_bodies(cmd)):
+        violations.append(
+            "[ps-git-commit] Commit through the Bash tool, not PowerShell: commit-review hooks run "
+            "on Bash only, so a PowerShell commit skips them. Run the same git command with Bash.")
 
     if violations:
         return g.block("PowerShell command violates one or more discipline rules.",

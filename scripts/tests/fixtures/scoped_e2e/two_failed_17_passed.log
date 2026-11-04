@@ -1,0 +1,79 @@
+
+Running 19 tests using 3 workers
+····×······F·······×F
+
+  1) [chromium] › tests/todo-list.spec.js:85:3 › Todo list › shows the focus ring on the add button 
+
+    Error: expect(locator).toHaveCSS(expected) failed
+
+    Locator: getByTestId('todo-add')
+    Expected string: "2px"
+    Received string: "1px"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toHaveCSS" with timeout 5000ms
+      - waiting for getByTestId('todo-add')
+        9 × locator resolved to <button type="button" data-testid="todo-add">…</button>
+          - unexpected value "1px"
+
+
+      55 |   await expect(el).toHaveCSS('outline-style', 'solid');
+    > 57 |   await expect(el).toHaveCSS('outline-width', '2px');
+         |                    ^
+      58 |   await expect(el).toHaveCSS('outline-offset', '2px');
+        at /srv/web/tests/todo-list.spec.js:57:20
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────
+    test-results/todo-list-Todo-list-sho-1a2b3-ring-on-the-add-button-chromium/test-failed-1.png
+    ───────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ────────────────────────────────────────────
+    test-results/todo-list-Todo-list-sho-1a2b3-ring-on-the-add-button-chromium/video.webm
+    ───────────────────────────────────────────────────────
+
+    Error Context: test-results/todo-list-Todo-list-sho-1a2b3-ring-on-the-add-button-chromium/error-context.md
+
+  2) [chromium] › tests/settings.spec.js:36:3 › Settings › draws the focus ring on the save link on keyboard focus only 
+
+    Error: expect(locator).toHaveCSS(expected) failed
+
+    Locator: getByTestId('settings-save')
+    Expected string: "2px"
+    Received string: "1px"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toHaveCSS" with timeout 5000ms
+      - waiting for getByTestId('settings-save')
+        9 × locator resolved to <a href="/settings" data-testid="settings-save">…</a>
+          - unexpected value "1px"
+
+
+      60 |   await expect(el).toHaveCSS('outline-style', 'solid');
+    > 62 |   await expect(el).toHaveCSS('outline-width', '2px');
+         |                    ^
+      63 |   await expect(el).toHaveCSS('outline-offset', '2px');
+        at /srv/web/tests/settings.spec.js:62:20
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────
+    test-results/settings-Settings-draw-4c5d6-on-keyboard-focus-only-chromium/test-failed-1.png
+    ───────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ────────────────────────────────────────────
+    test-results/settings-Settings-draw-4c5d6-on-keyboard-focus-only-chromium/video.webm
+    ───────────────────────────────────────────────────────
+
+    Error Context: test-results/settings-Settings-draw-4c5d6-on-keyboard-focus-only-chromium/error-context.md
+
+
+  2 failed
+    [chromium] › tests/todo-list.spec.js:85:3 › Todo list › shows the focus ring on the add button 
+    [chromium] › tests/settings.spec.js:36:3 › Settings › draws the focus ring on the save link on keyboard focus only 
+  17 passed (1.8m)
+
+[WebServer] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

@@ -11,7 +11,7 @@ one row per isolated slot 1..`config: slots.count` (the shared slot,
     | Slot | Status | Story ID | Branch | Worktree | Since |
     |------|--------|----------|--------|----------|-------|
     | 1 | free | — | — | — | — |
-    | 2 | in_use | 7-2 | story/7-2 | /abs/path/to/worktrees/7-2 | 2026-01-01 |
+    | 2 | in_use | 7-92 | story/7-92 | /abs/path/to/worktrees/7-92 | 2026-01-01 |
 
 Empty cells are U+2014. Story IDs are stored dashed (`7.5.8` → `7-5-8`).
 Rows are written only by reserve_slot.py / release_slot.py / this script, each

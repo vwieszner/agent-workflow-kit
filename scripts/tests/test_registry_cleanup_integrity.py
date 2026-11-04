@@ -40,11 +40,11 @@ class RegistryParserTests(unittest.TestCase):
         root = te.enter(self, "")
         reg = root / SPECS / "slot-registry.md"
         reg.parent.mkdir(parents=True)
-        reg.write_text("﻿" + HEADER + "| 2 | in_use | 7-2 | story/7-2 | wt/7-2 |\n",
+        reg.write_text("﻿" + HEADER + "| 2 | in_use | 7-92 | story/7-92 | wt/7-92 |\n",
                        encoding="utf-8")
         rows = _registry_lookup.rows()
-        self.assertEqual([(r["slot"], r["story_id"], r["since"]) for r in rows], [(2, "7-2", "")])
-        self.assertEqual(_registry_lookup.find("7-2")["worktree_path"], (root / "wt" / "7-2").resolve())
+        self.assertEqual([(r["slot"], r["story_id"], r["since"]) for r in rows], [(2, "7-92", "")])
+        self.assertEqual(_registry_lookup.find("7-92")["worktree_path"], (root / "wt" / "7-92").resolve())
 
 
 class CleanupResolveTests(unittest.TestCase):
@@ -55,17 +55,17 @@ class CleanupResolveTests(unittest.TestCase):
         git(self.root, "add", "-A")
         git(self.root, "commit", "-qm", "base")
         self.wts = self.root / "wts"
-        git(self.root, "worktree", "add", "-q", "-b", "story/5-1", str(self.wts / "5-1"), "main")
+        git(self.root, "worktree", "add", "-q", "-b", "story/5-91", str(self.wts / "5-91"), "main")
         write_registry(self.root, "| 1 | free | — | — | — | — |\n")
 
     def test_a_sibling_story_worktree_is_never_resolved(self):
         _slot, branch, wt = cleanup_story_stack.resolve_worktree("5", self.wts)
-        self.assertNotEqual(wt, self.wts / "5-1")
-        self.assertNotEqual(branch, "story/5-1")
+        self.assertNotEqual(wt, self.wts / "5-91")
+        self.assertNotEqual(branch, "story/5-91")
 
     def test_absent_dir_resolves_to_the_exact_path_for_an_idempotent_rerun(self):
         slot, branch, wt = cleanup_story_stack.resolve_worktree("5", self.wts)
-        # "5" has no dir of its own: the resolution must not be 5-1's.
+        # "5" has no dir of its own: the resolution must not be 5-91's.
         self.assertIsNone(slot)
         self.assertEqual(branch, "story/5")
         self.assertEqual(wt, self.wts / "5")
@@ -82,10 +82,10 @@ class CleanupResolveTests(unittest.TestCase):
 
     def test_a_dir_the_registry_assigns_to_another_story_is_refused(self):
         git(self.root, "worktree", "add", "-q", "-b", "story/5", str(self.wts / "5"), "main")
-        write_registry(self.root, f"| 1 | in_use | 7-7 | story/7-7 | {self.wts / '5'} | 2026-01-01 |\n")
+        write_registry(self.root, f"| 1 | in_use | 7-97 | story/7-97 | {self.wts / '5'} | 2026-01-01 |\n")
         with self.assertRaises(LookupError) as cm:
             cleanup_story_stack.resolve_worktree("5", self.wts)
-        self.assertIn("7-7", str(cm.exception))
+        self.assertIn("7-97", str(cm.exception))
 
 
 class MergeRangeTests(unittest.TestCase):

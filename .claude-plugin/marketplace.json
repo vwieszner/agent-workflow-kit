@@ -1,0 +1,13 @@
+{
+  "name": "agent-workflow-kit",
+  "owner": {"name": "agent-workflow-kit maintainers"},
+  "description": "Marketplace for the agent-workflow-kit Claude Code plugin.",
+  "plugins": [
+    {
+      "name": "agent-workflow-kit",
+      "source": "./plugins/agent-workflow-kit",
+      "description": "Spec-driven, human-gated development workflow: isolated story slots, tests-first implementation, layered review, guarded merges, an autonomous loop and a learning loop.",
+      "license": "MIT"
+    }
+  ]
+}

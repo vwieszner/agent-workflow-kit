@@ -42,6 +42,9 @@ Exit codes:
   0 -- success (reservation + worktree + background bring-up launched or skipped)
   1 -- error (reserve / worktree / launch failure)
   2 -- no free slot
+  4 -- the story already holds a slot and the caller did not pass that slot as
+       --reserved-slot (another session owns the story), or --reserved-slot was
+       passed for a story that held no slot (the fresh claim is released)
   3 -- spec ambiguity (multiple candidate spec files)
 
 Invoked by the parallel-dev-wave skill (Phase 1), from the repo root:
@@ -167,8 +170,11 @@ def launch_detached(argv: list[str], cwd: Path, env: dict) -> str:
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)  # pyright: ignore[reportAttributeAccessIssue] — keep progress ordered around child output
     ap = argparse.ArgumentParser(description="parallel-dev-wave Phase 1 story setup")
-    ap.add_argument("story_id", help="story id -- dotted (7.5.8) or dashed (21-3)")
+    ap.add_argument("story_id", help="story id -- dotted (7.5.8) or dashed (21-93)")
     ap.add_argument("--repo-root", default=None, help="default: wfconfig repo root")
+    ap.add_argument("--reserved-slot", type=int, default=None,
+                    help="the slot the caller itself reserved for this story with reserve_slot.py "
+                         "(auto-dev-loop); without it an existing reservation is refused")
     args = ap.parse_args()
     repo_root = _stack.set_repo_root(args.repo_root)
     child_env = dict(os.environ, WORKFLOW_REPO_ROOT=str(repo_root))
@@ -190,10 +196,22 @@ def main() -> None:
         fail(f"could not parse reserve_slot.py output: {json_lines[-1]!r}")
 
     status = r.get("status")
+    # One story, one session: an existing reservation is reused only by the caller that
+    # made it and names its slot; any other caller is refused before anything is touched.
     if status == "reserved":
-        pass
+        if args.reserved_slot is not None:
+            release = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve().parent / "release_slot.py"),
+                 "--story-id", args.story_id], capture_output=True, text=True, env=child_env)
+            fail(f"--reserved-slot {args.reserved_slot} given, but {args.story_id} held no slot; "
+                 f"reserve_slot.py claimed slot {r['slot']} fresh "
+                 f"(release_slot.py exit {release.returncode}: {release.stdout.strip()[:200]})", 4)
     elif status == "already_reserved":
-        print(f"  story already reserved in slot {r['slot']} -- reusing")
+        if args.reserved_slot != int(r["slot"]):
+            fail(f"{args.story_id} already holds slot {r['slot']} -- another session owns it. "
+                 f"Refusing: two sessions must never run the same story. "
+                 f"Check the slot registry and the running sessions / unattended drivers.", 4)
+        print(f"  story reserved in slot {r['slot']} by this caller (--reserved-slot) -- reusing")
     elif status == "no_free_slot":
         fail(f"all {wfconfig.get('slots.count', 6)} slots are in_use", 2)
     else:

@@ -33,7 +33,7 @@ ALLOWED = [
     ("uv remove --no-sync", "uv remove --no-sync httpx"),
     ("uv lock", "uv lock"),
     ("pip list (read-only)", "pip list"),
-    ("push to a story branch", "git push origin story/7-44"),
+    ("push to a story branch", "git push origin story/7-944"),
     ("git status", "git status"),
     ("quoted backslash path", 'ls "C:\\work\\demo"'),
     ("forward-slash windows path", "ls C:/work/demo"),

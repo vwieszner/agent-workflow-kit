@@ -2,9 +2,9 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""Tear down a story slot: orphan compose-watch kill, `compose down -v`, story-record
-preservation, worktree removal, branch delete, slot release, graph-project delete,
-per-stack setup artifacts.
+"""Tear down a story slot: orphan compose-watch kill, `compose down -v`, story-record and
+post-land file preservation, worktree removal, branch + train/review ref delete, slot
+release, graph-project delete, per-stack setup artifacts.
 
 Orphan watch: a `compose watch` started in the background can outlive the
 session that started it and keep the worktree directory busy through its CWD
@@ -32,7 +32,14 @@ Safety:
     `.workflow/state/story-setup/<stack>.graph_project` sidecar written by
     story_setup.py; missing/empty sidecar → graph delete SKIPPED with a warning.
   - The story record (`<specs_dir>/<id>-record.md` in the worktree) is copied
-    into the main repo's specs dir BEFORE the worktree is deleted.
+    into the main repo's specs dir BEFORE the worktree is deleted, and the story's
+    propagation checklist and range diffs (`.workflow/state/story-setup/propagation-<id>.md`,
+    `range-diff-<id>-*.txt`, read after the land) are copied into
+    `<config: paths.story_history_dir>/<id>/` for land-story's bookkeeping commit.
+  - A compose-watch process still alive after the kill ends the run with exit 1
+    before anything is removed.
+  - Inside an unattended driver session (`auto_dev_guard.MARKER` set) a full teardown
+    of a worktree whose HEAD is not merged into the base branch is refused (exit 2).
   - The slot-registry row is released LAST (via release_slot.py — never
     reimplemented here), after the worktree and branch are gone, so a cleanup
     that dies part-way leaves the row `in_use` as the signal it did not finish.
@@ -45,9 +52,12 @@ Run:
   uv run --no-project .workflow/scripts/cleanup_story_stack.py <story-id>
   uv run --no-project .workflow/scripts/cleanup_story_stack.py <story-id> --dry-run
   uv run --no-project .workflow/scripts/cleanup_story_stack.py <story-id> --skip-docker-down --skip-branch-delete
+  uv run --no-project .workflow/scripts/cleanup_story_stack.py <story-id> --keep-worktree   # kill the watch only
 
 Exit codes: 0 on completion (warnings possible); 1 when the worktree cannot be
-resolved, the safety refusal fires, or an unexpected error aborts the teardown.
+resolved, the safety refusal fires, a compose-watch process survives the kill, or an
+unexpected error aborts the teardown; 2, before any action, when an unattended driver
+session asks for a full teardown of an unmerged worktree.
 """
 from __future__ import annotations
 
@@ -93,7 +103,7 @@ def resolve_worktree(story_id: str, worktree_root: Path):
             return row["slot"], row["branch"] or wfconfig.branch_name(story_id), wt
     # Fallback (registry row already free): ONLY the dir named exactly <id>, and only when
     # git registers it on this story's branch. A prefix match would reach a sibling story
-    # (`5` → `5-1`) and delete its worktree and branch.
+    # (`5` → `5-91`) and delete its worktree and branch.
     branch = wfconfig.branch_name(story_id)
     cand = worktree_root / story_id
     if not cand.exists():
@@ -146,6 +156,49 @@ def preserve_story_record(story_id: str, worktree: Path, repo_root: Path) -> Non
         print(f"\nstory record preserved: {src} -> {dest}")
         print("  (stage it in /land-story's bookkeeping commit; it is the only durable "
               "evidence of the merge approval)")
+
+
+def preserve_story_files(story_id: str, repo_root: Path) -> list[Path]:
+    """Copy the story's propagation checklist and range diffs from the state dir into
+    `<story_history_dir>/<id>/`; returns the copies (land-story's bookkeeping commit lands them)."""
+    setup = wfconfig.state_dir("story-setup")
+    sources = sorted({*setup.glob(f"propagation-{story_id}.md"), *setup.glob(f"range-diff-{story_id}-*.txt")})
+    if not sources:
+        print(f"\nstory files: no propagation checklist or range diff for {story_id} under {setup}")
+        return []
+    dest_dir = wfconfig.path("paths.story_history_dir", "docs/implementation-artifacts/story-history") / story_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    copies = []
+    for src in sources:
+        dest = dest_dir / src.name
+        shutil.copy2(src, dest)
+        copies.append(dest)
+        print(f"story file preserved: {src} -> {dest}")
+    print("  (stage them in land-story's bookkeeping commit)")
+    return copies
+
+
+def _merge_refusal(worktree: Path, repo_root: Path) -> str | None:
+    try:
+        import auto_dev_guard
+    except ImportError:
+        return None
+    return auto_dev_guard.merge_refusal(worktree, repo_root)
+
+
+def _delete_story_refs(repo_root: Path, branch: str) -> None:
+    """The merge train's and the review stage's refs of the branch (each module optional)."""
+    for module, fn, err in (("merge_train", "delete_train", "TrainError"),
+                            ("review_stage", "delete_review_refs", "StageError")):
+        try:
+            mod = __import__(module)
+        except ImportError:
+            continue
+        try:
+            for ref in getattr(mod, fn)(repo_root, branch):
+                print(f"deleted {ref}")
+        except getattr(mod, err) as exc:
+            print(f"WARNING: the {module} refs of {branch} were NOT deleted: {exc}")
 
 
 def release_slot_row(story_id: str) -> str:
@@ -250,6 +303,9 @@ def main() -> int:
                     help="skip 'compose down -v' (orphan recovery)")
     ap.add_argument("--skip-branch-delete", action="store_true",
                     help="skip 'git branch -D' (orphan recovery / preserve WIP)")
+    ap.add_argument("--keep-worktree", action="store_true",
+                    help="kill the worktree's orphan compose-watch processes only; keep the stack, worktree, "
+                         "branch, graph project, setup files and slot row (auto-dev-loop halt-and-release)")
     args = ap.parse_args()
     repo_root = _stack.set_repo_root(args.repo_root)
     worktree_root = Path(args.worktree_root) if args.worktree_root else wfconfig.worktrees_root()
@@ -276,6 +332,12 @@ def main() -> int:
     print(f"Slot number : {slot_num if slot_num is not None else '<unknown -- registry already free>'}")
     print(f"DryRun      : {args.dry_run}")
     print()
+
+    if not args.keep_worktree:
+        refusal = _merge_refusal(worktree, repo_root)
+        if refusal:
+            print(f"ERROR: {refusal}")
+            return 2
 
     # ---------------------------------------------- orphan compose-watch kill
     orphans, note = find_orphans(worktree)
@@ -305,6 +367,17 @@ def main() -> int:
             for pid in victims:
                 _stack.kill_pid(pid)
             time.sleep(0.5)
+            survivors, _note = find_orphans(worktree)
+            if survivors:
+                print(f"\nERROR: compose-watch processes still running: "
+                      f"{','.join(str(o['pid']) for o in survivors)}. {worktree} is left in place: "
+                      "stop them, then rerun.")
+                return 1
+
+    if args.keep_worktree:
+        print(f"\n--keep-worktree: worktree, branch, stack, graph project, setup files and slot row "
+              f"of {sid} left as they are.")
+        return 0
 
     # -------------------------------------------------------- standard teardown
     if not args.dry_run:
@@ -332,6 +405,7 @@ def main() -> int:
             else:
                 print(f"{' '.join(down[:-2])} -- no containers/volumes/network present, skipping down -v")
 
+        preserve_story_files(sid, repo_root)
         if worktree.exists():
             preserve_story_record(sid, worktree, repo_root)
             print(f"\ngit worktree remove --force {worktree}")
@@ -358,6 +432,7 @@ def main() -> int:
                 run_stream(["git", "-C", str(repo_root), "branch", "-D", branch])
             else:
                 print(f"Branch {branch} already deleted.")
+            _delete_story_refs(repo_root, branch)
 
         # Last registry step: ordered after worktree + branch removal so a cleanup
         # that fails above leaves `in_use` behind as evidence.
