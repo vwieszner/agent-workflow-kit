@@ -6,9 +6,11 @@ kit and rebuild. The kit's README covers the workflow itself.
 ## Install
 
 ```
-/plugin marketplace add vwieszner/agent-workflow-kit
+/plugin marketplace add <owner>/agent-workflow-kit
 /plugin install agent-workflow-kit@agent-workflow-kit
 ```
+
+`<owner>/agent-workflow-kit` is the GitHub `owner/repo` path this kit is hosted at (or a local clone's path).
 
 Then, once per project, invoke the `agent-workflow-kit:setup` skill (it creates `.workflow/config.toml`,
 the project rules files and the slot registry, and adds the kit's deny rules to `.claude/settings.json`),

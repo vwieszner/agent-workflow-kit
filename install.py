@@ -694,9 +694,11 @@ kit and rebuild. The kit's README covers the workflow itself.
 ## Install
 
 ```
-/plugin marketplace add vwieszner/agent-workflow-kit
+/plugin marketplace add <owner>/agent-workflow-kit
 /plugin install agent-workflow-kit@agent-workflow-kit
 ```
+
+`<owner>/agent-workflow-kit` is the GitHub `owner/repo` path this kit is hosted at (or a local clone's path).
 
 Then, once per project, invoke the `agent-workflow-kit:setup` skill (it creates `.workflow/config.toml`,
 the project rules files and the slot registry, and adds the kit's deny rules to `.claude/settings.json`),
@@ -753,7 +755,7 @@ def build_plugin(out: Path) -> list[str]:
                 "description": "Spec-driven, human-gated development workflow: isolated story slots, "
                                "tests-first implementation, layered review, guarded merges, an autonomous "
                                "loop and a learning loop.",
-                "repository": "https://github.com/vwieszner/agent-workflow-kit", "license": "MIT",
+                "license": "MIT",
                 "keywords": ["workflow", "code-review", "agents", "tdd", "git-worktree"]}
     put(".claude-plugin/plugin.json", json.dumps(manifest, indent=2) + "\n")
     for base in (KIT / "skills", KIT / "vendor" / "bmad" / "skills", KIT / "plugin" / "skills"):
